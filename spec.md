@@ -196,153 +196,9 @@ Client App                      License Server
 
 ## 4. Client Certificate Workflows
 
-### 4.1 Certificate Enrollment Process
+### 4.1 Prerequisites and Setup
 
-**Portal-Based Token Distribution:**
-The certificate enrollment process uses an existing customer portal for secure token generation, followed by a two-phase authentication model.
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as Customer Portal
-    participant DB as Portal Database
-    participant C as Client App
-    participant LS as License Server (TLS)
-    participant CA as Private CA
-    participant LSM as License Server (mTLS)
-    
-    Note over U,P: Token Generation via Portal
-    U->>P: Login with Existing Credentials
-    P->>P: Authenticate User
-    P->>DB: Verify Subscription Status
-    DB->>P: Subscription Details
-    P->>P: Generate Single-Use Enrollment Token
-    P->>DB: Store Token with User Mapping
-    P->>U: Display Token + Download Instructions
-    
-    Note over U,C: Client Certificate Enrollment (TLS Only)
-    U->>C: Enter Enrollment Token
-    C->>C: Generate RSA Key Pair (2048-bit)
-    C->>C: Create Certificate Signing Request (CSR)
-    
-    Note over C,LS: Token Validation & Certificate Issuance (TLS)
-    C->>LS: Submit CSR + Enrollment Token (TLS - No Client Cert)
-    LS->>DB: Validate Token & Retrieve User Info
-    LS->>LS: Extract Subject Info from User Record
-    LS->>CA: Request Certificate Issuance (CSR + Subject)
-    CA->>CA: Issue X.509 Certificate
-    CA->>LS: Return Signed Certificate
-    LS->>DB: Mark Token as Used
-    LS->>C: Return Certificate + Initial License Token (TLS)
-    
-    Note over C: Certificate Installation
-    C->>C: Install Cert + Private Key in Platform Keystore
-    C->>C: Verify Certificate Installation
-    
-    Note over C,LSM: All Future Operations Use mTLS
-    C->>LSM: License Renewal Request (mTLS with Client Cert)
-    LSM->>LSM: Validate Client Certificate
-    LSM->>C: License Response (mTLS)
-```
-### 4.1.1 Device Limit Enforcement
-
-When a user requests a new enrollment token, the system checks if the user has reached their subscription's device limit. If at limit, enrollment is blocked until the user revokes an existing device certificate via the portal.
-
-**Enrollment Token Generation Behavior:**
-
-1. User authenticates to portal
-2. User requests new enrollment token
-3. System counts active certificates for user
-4. If count < device_limit: Generate enrollment token
-5. If count >= device_limit: Throw DeviceLimitReachedException with list of enrolled devices
-6. User must manually revoke a device via portal before proceeding
-
-**Device Identification:**
-During enrollment, clients provide device name and platform for user identification of devices in portal.
-
-
-### 4.2 Enrollment Token Service Interface
-
-**Token Generation:**
-```php
-interface IEnrollmentTokenService {
-    /**
-     * Generate single-use enrollment token for certificate provisioning 
-     * Checks device limit before generating token. 
-     * @param int $userId - User ID from portal session
-     * @return array {token, expires_at, instructions, devices_enrolled, device_limit}
-     * @throws NoActiveSubscriptionException
-     * @throws DeviceLimitReachedException (includes list of enrolled devices)
-     * @throws RateLimitException (max 5 tokens/24h)
-     */
-    public function generateEnrollmentToken(int $userId): array;
-    
-    /**
-     * Validate enrollment token and return user context
-     * @param string $token - Token submitted by client
-     * @return array User and subscription details
-     * @throws InvalidTokenException if token invalid/expired/used
-     */
-    public function validateToken(string $token): array;
-    
-    /**
-     * Mark token as used after certificate issuance
-     * @param string $token
-     * @param string $certificateFingerprint - SHA256 of issued cert
-     */
-    public function markTokenUsed(string $token, string $certificateFingerprint): void;
-}
-```
-
-```php
-class DeviceLimitReachedException extends Exception {
-    /**
-     * @return array List of enrolled devices with identifying information
-     * [{certificate_fingerprint, device_name, platform, enrolled_at, last_seen}]
-     */
-    public function getEnrolledDevices(): array;
-}
-```
-
-### 4.3 Certificate Authority Service Interface
-
-**Certificate Issuance:**
-```php
-interface IPrivateCAService {
-    /**
-     * Issue client certificate from CSR
-     * @param string $csrPem - Certificate Signing Request in PEM format
-     * @param string $subject - Distinguished Name (CN, O, OU)
-     * @param array $options - Certificate options (keyUsage, validityPeriod)
-     * @return string Certificate in PEM format
-     */
-    public function issueCertificate(
-        string $csrPem, 
-        string $subject, 
-        array $options
-    ): string;
-    
-    /**
-     * Get CA certificate chain for client validation
-     * @return array ['root_ca' => string, 'intermediate_ca' => string]
-     */
-    public function getCertificateChain(): array;
-    
-    /**
-     * Revoke certificate (account deletion)
-     * @param string $serialNumber - Certificate serial number
-     * @param string $reason - Revocation reason
-     * @param DateTime $revokedAt - Revocation timestamp
-     */
-    public function revokeCertificate(
-        string $serialNumber,
-        string $reason,
-        DateTime $revokedAt
-    ): void;
-}
-```
-
-### 4.4 CA Setup Commands
+#### 4.1.1 CA Infrastructure Setup
 
 **Root CA Initialization (Offline):**
 ```bash
@@ -395,7 +251,7 @@ openssl ca -config intermediate-ca.cnf \
     -out client.crt
 ```
 
-### 4.5 License Signing Keys Setup
+#### 4.1.2 License Signing Keys Setup
 
 **Separate from CA Keys:**
 ```bash
@@ -406,12 +262,235 @@ openssl genrsa -aes256 -out license-signing.key 2048
 openssl rsa -in license-signing.key -pubout -out license-signing.pub
 ```
 
-**Key Separation:**
+**Key Separation Rationale:**
 - CA keys: Used for certificate issuance only
 - License keys: Used for JWT signing only
 - Compromised license key does NOT compromise CA infrastructure
+- Allows independent key rotation schedules
 
-### 4.6 Certificate Storage Strategy
+---
+
+### 4.2 Service Interfaces
+
+#### 4.2.1 Enrollment Token Service Interface
+
+**Token Generation:**
+```php
+interface IEnrollmentTokenService {
+    /**
+     * Generate single-use enrollment token for certificate provisioning 
+     * Checks device limit before generating token. 
+     * @param int $userId - User ID from portal session
+     * @return array {token, expires_at, instructions, devices_enrolled, device_limit}
+     * @throws NoActiveSubscriptionException
+     * @throws DeviceLimitReachedException (includes list of enrolled devices)
+     * @throws RateLimitException (max 5 tokens/24h)
+     */
+    public function generateEnrollmentToken(int $userId): array;
+    
+    /**
+     * Validate enrollment token and return user context
+     * @param string $token - Token submitted by client
+     * @return array User and subscription details
+     * @throws InvalidTokenException if token invalid/expired/used
+     */
+    public function validateToken(string $token): array;
+    
+    /**
+     * Mark token as used after certificate issuance
+     * @param string $token
+     * @param string $certificateFingerprint - SHA256 of issued cert
+     */
+    public function markTokenUsed(string $token, string $certificateFingerprint): void;
+}
+```
+
+**Device Limit Exception:**
+```php
+class DeviceLimitReachedException extends Exception {
+    /**
+     * @return array List of enrolled devices with identifying information
+     * [{certificate_fingerprint, device_name, platform, enrolled_at, last_seen}]
+     */
+    public function getEnrolledDevices(): array;
+}
+```
+
+#### 4.2.2 Private CA Service Interface
+
+**Certificate Issuance:**
+```php
+interface IPrivateCAService {
+    /**
+     * Issue client certificate from CSR
+     * @param string $csrPem - Certificate Signing Request in PEM format
+     * @param string $subject - Distinguished Name (CN, O, OU)
+     * @param array $options - Certificate options (keyUsage, validityPeriod)
+     * @return string Certificate in PEM format
+     */
+    public function issueCertificate(
+        string $csrPem, 
+        string $subject, 
+        array $options
+    ): string;
+    
+    /**
+     * Get CA certificate chain for client validation
+     * @return array ['root_ca' => string, 'intermediate_ca' => string]
+     */
+    public function getCertificateChain(): array;
+    
+    /**
+     * Revoke certificate (account deletion)
+     * @param string $serialNumber - Certificate serial number
+     * @param string $reason - Revocation reason
+     * @param DateTime $revokedAt - Revocation timestamp
+     */
+    public function revokeCertificate(
+        string $serialNumber,
+        string $reason,
+        DateTime $revokedAt
+    ): void;
+}
+```
+
+#### 4.2.3 Device Management Service Interface
+
+**Device Management:**
+```php
+interface IDeviceManagementService {
+    /**
+     * List all enrolled devices for user
+     * @param int $userId
+     * @return array [{
+     *   certificate_fingerprint,
+     *   certificate_serial,
+     *   device_name,
+     *   platform,
+     *   enrolled_at,
+     *   last_seen,
+     *   status: 'active'|'revoked'
+     * }]
+     */
+    public function listUserDevices(int $userId): array;
+    
+    /**
+     * Revoke specific device certificate
+     * @param int $userId
+     * @param string $certificateFingerprint
+     * @throws UnauthorizedException if cert doesn't belong to user
+     */
+    public function revokeDevice(int $userId, string $certificateFingerprint): void;
+}
+```
+
+---
+
+### 4.3 Certificate Enrollment Workflow
+
+#### 4.3.1 Certificate Enrollment Process
+
+**Portal-Based Token Distribution:**
+The certificate enrollment process uses an existing customer portal for secure token generation, followed by a two-phase authentication model. See section 4.3.2 for device limit enforcement during enrollment.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as Customer Portal
+    participant DB as Portal Database
+    participant C as Client App
+    participant LS as License Server (TLS)
+    participant CA as Private CA
+    participant LSM as License Server (mTLS)
+    
+    Note over U,P: Token Generation via Portal
+    U->>P: Login with Existing Credentials
+    P->>P: Authenticate User
+    P->>DB: Verify Subscription Status
+    DB->>P: Subscription Details
+    P->>P: Check Device Limit (see 4.3.2)
+    P->>P: Generate Single-Use Enrollment Token
+    P->>DB: Store Token with User Mapping
+    P->>U: Display Token + Download Instructions
+    
+    Note over U,C: Client Certificate Enrollment (TLS Only)
+    U->>C: Enter Enrollment Token
+    C->>C: Generate RSA Key Pair (2048-bit)
+    C->>C: Create Certificate Signing Request (CSR)
+    C->>C: Collect Device Info (name, platform)
+    
+    Note over C,LS: Token Validation & Certificate Issuance (TLS)
+    C->>LS: Submit CSR + Token + Device Info (TLS - No Client Cert)
+    Note right of C: {enrollment_token, csr, device_id,<br/>device_name, platform}
+    LS->>DB: Validate Token & Retrieve User Info
+    LS->>LS: Extract Subject Info from User Record
+    LS->>CA: Request Certificate Issuance (CSR + Subject)
+    CA->>CA: Issue X.509 Certificate
+    CA->>LS: Return Signed Certificate
+    LS->>DB: Mark Token as Used
+    LS->>DB: Store Device Info with Certificate
+    LS->>C: Return Certificate + Initial License Token (TLS)
+    Note right of LS: {certificate, ca_chain,<br/>license_token, subscription_info}
+    
+    Note over C: Certificate Installation
+    C->>C: Install Cert + Private Key in Platform Keystore
+    C->>C: Verify Certificate Installation
+    
+    Note over C,LSM: All Future Operations Use mTLS
+    C->>LSM: License Renewal Request (mTLS with Client Cert)
+    LSM->>LSM: Validate Client Certificate
+    LSM->>C: License Response (mTLS)
+```
+
+#### 4.3.2 Device Limit Enforcement
+
+**Enrollment Token Generation Behavior:**
+
+When a user requests a new enrollment token, the system checks if the user has reached their subscription's device limit. If at limit, enrollment is blocked until the user revokes an existing device certificate via the portal.
+
+**Flow:**
+1. User authenticates to portal
+2. User requests new enrollment token
+3. System counts active certificates for user
+4. If count < device_limit: Generate enrollment token
+5. If count >= device_limit: Throw `DeviceLimitReachedException` with list of enrolled devices
+6. User must manually revoke a device via portal before proceeding
+
+**Device Identification:**
+
+During enrollment, clients provide device name and platform for user identification of devices in portal. This allows users to easily identify which device to revoke when at the device limit.
+
+**Client submits during enrollment:**
+```json
+{
+  "enrollment_token": "...",
+  "csr": "...",
+  "device_id": "device_abc123...",
+  "device_name": "John's MacBook Pro",
+  "platform": "macos"
+}
+```
+
+**Server returns:**
+```json
+{
+  "certificate": "...",
+  "ca_chain": "...",
+  "license_token": "...",
+  "subscription_info": {
+    "devices_enrolled": 2,
+    "device_limit": 5
+  }
+}
+```
+
+**Attack Mitigation:**
+- Device limits prevent unlimited certificate sharing
+- Revocation is manual and explicit, requiring portal authentication
+- Each device has user-friendly identification (name + platform)
+- Revoked certificates added to CRL immediately
+
+#### 4.3.3 Certificate Storage Strategy
 
 **Platform-Specific Secure Storage:**
 
@@ -433,7 +512,11 @@ openssl rsa -in license-signing.key -pubout -out license-signing.pub
 - Permissions: `chmod 600` (owner read/write only)
 - Optional: Integration with GNOME Keyring or KWallet
 
-### 4.7 Certificate Validation Workflow
+---
+
+### 4.4 Certificate Lifecycle Management
+
+#### 4.4.1 Certificate Validation Workflow
 
 ```mermaid
 flowchart TD
@@ -455,7 +538,15 @@ flowchart TD
     M --> N
 ```
 
-### 4.8 Certificate Renewal Process
+**Validation Steps:**
+1. Validate certificate chain against CA certificate
+2. Check certificate not expired
+3. Check certificate not revoked (CRL)
+4. Verify Extended Key Usage includes Client Authentication
+5. Extract certificate fingerprint (SHA-256)
+6. Link certificate to user account in database
+
+#### 4.4.2 Certificate Renewal Process
 
 ```mermaid
 sequenceDiagram
@@ -484,7 +575,22 @@ sequenceDiagram
     C->>C: Remove Old Certificate
 ```
 
-### 4.9 Certificate Revocation Handling
+**Renewal Timeline:**
+- Renewal window: 30 days before expiry
+- Grace period: 7 days post-expiry before blocking access
+- Email notifications: 60, 30, and 7 days before expiry
+- Automated renewal for clients online during renewal window
+
+**Certificate Transition:**
+1. Client detects certificate expiring within 30 days
+2. Generate new key pair and CSR
+3. Submit renewal request via mTLS (authenticated with old cert)
+4. Server validates old certificate and issues new certificate
+5. Client installs new certificate alongside old
+6. Client updates license server mapping
+7. Client removes old certificate after successful verification
+
+#### 4.4.3 Certificate Revocation Handling
 
 **Account-Driven Revocation:**
 Certificate revocation occurs only when a user deletes their account from the customer portal.
@@ -518,81 +624,30 @@ sequenceDiagram
     P->>U: Account Deletion Confirmation
 ```
 
-## Section 4.10 - Device Limit Enforcement
+**CRL Distribution:**
+- Update CRL every 24 hours
+- Publish to web-accessible endpoint: `https://license-server.com/crl/current.crl`
+- Include in certificate AIA extension
+- Cache-Control headers: max-age=86400 (24 hours)
 
-When a user requests a new enrollment token, the system checks if the user has reached their subscription's device limit. If at limit, enrollment is blocked until the user revokes an existing device certificate via the portal.
+**Revocation Events:**
+- Account deletion by user
+- Account termination by administrator
+- Certificate compromise report
+- Subscription fraud detection
 
-**Enrollment Token Generation Behavior:**
+**Lost Device Recovery:**
 
-1. User authenticates to portal
-2. User requests new enrollment token
-3. System counts active certificates for user
-4. If count < device_limit: Generate enrollment token
-5. If count >= device_limit: Throw DeviceLimitReachedException with list of enrolled devices
-6. User must manually revoke a device via portal before proceeding
+When device is lost/stolen:
+1. User logs into portal
+2. Views list of enrolled devices (see 4.2.3)
+3. Revokes the lost device certificate
+4. Generates new enrollment token for replacement device
+5. Enrolls replacement device
 
-**Device Identification:**
-During enrollment, clients provide device name and platform for user identification of devices in portal.
-
-**Client submits during enrollment:**
-
-```json
-{
-  "enrollment_token": "...",
-  "csr": "...",
-  "device_id": "device_abc123...",
-  "device_name": "John's MacBook Pro",
-  "platform": "macos"
-}
-```
-
-**Server returns:**
-
-```json
-{
-  "certificate": "...",
-  "ca_chain": "...",
-  "license_token": "...",
-  "subscription_info": {
-    "devices_enrolled": 2,
-    "device_limit": 5
-  }
-}
-```
-
----
-
-## Section 4.11 - Portal Device Management Interface
-
-**New service interface:**
-
-```php
-interface IDeviceManagementService {
-    /**
-     * List all enrolled devices for user
-     * @param int $userId
-     * @return array [{
-     *   certificate_fingerprint,
-     *   certificate_serial,
-     *   device_name,
-     *   platform,
-     *   enrolled_at,
-     *   last_seen,
-     *   status: 'active'|'revoked'
-     * }]
-     */
-    public function listUserDevices(int $userId): array;
-    
-    /**
-     * Revoke specific device certificate
-     * @param int $userId
-     * @param string $certificateFingerprint
-     * @throws UnauthorizedException if cert doesn't belong to user
-     */
-    public function revokeDevice(int $userId, string $certificateFingerprint): void;
-}
-```
-
+**Device limit enforcement:**
+- If at device limit: Must revoke before enrolling new device
+- If under limit: Can enroll additional device directly
 
 
 ## 5. Device Identification
