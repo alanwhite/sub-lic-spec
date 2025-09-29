@@ -30,10 +30,13 @@ The system uses a two-layer security architecture:
 - **Subscription-based licensing**: Monthly and annual subscription models
 - **Extended offline operation**: Full subscription period offline capability
 - **Grace period support**: 5 days for monthly, 14 days for annual subscriptions
-- **Multi-platform design**: Windows, macOS, and Linux (reference implementation: macOS)
+- **Multi-platform design**: Windows, macOS, and Linux (reference implementation provides macOS only)
 - **License migration**: Secure device transfer for hardware upgrades
 - **Private CA infrastructure**: Hierarchical certificate authority
 - **Mutual authentication**: X.509 certificates for both client and server identity
+- **Multi-device licensing**: Configurable device limits per subscription (1, 5, 10+ devices)
+- **Device management**: Portal-based device enrollment tracking and revocation
+- **Device identification**: User-provided device names and platform detection for easy identification
 
 ### 1.2 Architecture Overview
 
@@ -241,6 +244,22 @@ sequenceDiagram
     LSM->>LSM: Validate Client Certificate
     LSM->>C: License Response (mTLS)
 ```
+### 4.1.1 Device Limit Enforcement
+
+When a user requests a new enrollment token, the system checks if the user has reached their subscription's device limit. If at limit, enrollment is blocked until the user revokes an existing device certificate via the portal.
+
+**Enrollment Token Generation Behavior:**
+
+1. User authenticates to portal
+2. User requests new enrollment token
+3. System counts active certificates for user
+4. If count < device_limit: Generate enrollment token
+5. If count >= device_limit: Throw DeviceLimitReachedException with list of enrolled devices
+6. User must manually revoke a device via portal before proceeding
+
+**Device Identification:**
+During enrollment, clients provide device name and platform for user identification of devices in portal.
+
 
 ### 4.2 Enrollment Token Service Interface
 
@@ -248,10 +267,13 @@ sequenceDiagram
 ```php
 interface IEnrollmentTokenService {
     /**
-     * Generate single-use enrollment token for certificate provisioning
+     * Generate single-use enrollment token for certificate provisioning 
+     * Checks device limit before generating token. 
      * @param int $userId - User ID from portal session
-     * @return array {token: string, expires_at: datetime, instructions: string}
-     * @throws ExistingTokenException if user has unused token
+     * @return array {token, expires_at, instructions, devices_enrolled, device_limit}
+     * @throws NoActiveSubscriptionException
+     * @throws DeviceLimitReachedException (includes list of enrolled devices)
+     * @throws RateLimitException (max 5 tokens/24h)
      */
     public function generateEnrollmentToken(int $userId): array;
     
@@ -269,6 +291,16 @@ interface IEnrollmentTokenService {
      * @param string $certificateFingerprint - SHA256 of issued cert
      */
     public function markTokenUsed(string $token, string $certificateFingerprint): void;
+}
+```
+
+```php
+class DeviceLimitReachedException extends Exception {
+    /**
+     * @return array List of enrolled devices with identifying information
+     * [{certificate_fingerprint, device_name, platform, enrolled_at, last_seen}]
+     */
+    public function getEnrolledDevices(): array;
 }
 ```
 
@@ -485,6 +517,83 @@ sequenceDiagram
     P->>DB: Commit Transaction
     P->>U: Account Deletion Confirmation
 ```
+
+## Section 4.10 - Device Limit Enforcement
+
+When a user requests a new enrollment token, the system checks if the user has reached their subscription's device limit. If at limit, enrollment is blocked until the user revokes an existing device certificate via the portal.
+
+**Enrollment Token Generation Behavior:**
+
+1. User authenticates to portal
+2. User requests new enrollment token
+3. System counts active certificates for user
+4. If count < device_limit: Generate enrollment token
+5. If count >= device_limit: Throw DeviceLimitReachedException with list of enrolled devices
+6. User must manually revoke a device via portal before proceeding
+
+**Device Identification:**
+During enrollment, clients provide device name and platform for user identification of devices in portal.
+
+**Client submits during enrollment:**
+
+```json
+{
+  "enrollment_token": "...",
+  "csr": "...",
+  "device_id": "device_abc123...",
+  "device_name": "John's MacBook Pro",
+  "platform": "macos"
+}
+```
+
+**Server returns:**
+
+```json
+{
+  "certificate": "...",
+  "ca_chain": "...",
+  "license_token": "...",
+  "subscription_info": {
+    "devices_enrolled": 2,
+    "device_limit": 5
+  }
+}
+```
+
+---
+
+## Section 4.11 - Portal Device Management Interface
+
+**New service interface:**
+
+```php
+interface IDeviceManagementService {
+    /**
+     * List all enrolled devices for user
+     * @param int $userId
+     * @return array [{
+     *   certificate_fingerprint,
+     *   certificate_serial,
+     *   device_name,
+     *   platform,
+     *   enrolled_at,
+     *   last_seen,
+     *   status: 'active'|'revoked'
+     * }]
+     */
+    public function listUserDevices(int $userId): array;
+    
+    /**
+     * Revoke specific device certificate
+     * @param int $userId
+     * @param string $certificateFingerprint
+     * @throws UnauthorizedException if cert doesn't belong to user
+     */
+    public function revokeDevice(int $userId, string $certificateFingerprint): void;
+}
+```
+
+
 
 ## 5. Device Identification
 
@@ -825,6 +934,21 @@ interface IDeviceMigrationService {
 3. New device receives fresh license token bound to new device ID
 4. Migration token cannot be reused
 
+## Section 7.4 - Lost Device Recovery
+
+**Replace existing content with:**
+
+**When device is lost/stolen:**
+1. User logs into portal
+2. Views list of enrolled devices
+3. Revokes the lost device certificate
+4. Generates new enrollment token for replacement device
+5. Enrolls replacement device
+
+**Device limit enforcement:**
+- If at device limit: Must revoke before enrolling new device
+- If under limit: Can enroll additional device directly
+
 ## 8. Server Implementation
 
 ### 8.1 Core Service Interfaces
@@ -918,6 +1042,7 @@ CREATE TABLE subscriptions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     subscription_type ENUM('monthly', 'annual') NOT NULL,
+    device_limit INT NOT NULL DEFAULT 1,
     start_date DATETIME NOT NULL,
     end_date DATETIME NOT NULL,
     payment_status ENUM('active', 'pending', 'expired', 'cancelled') DEFAULT 'pending',
@@ -989,6 +1114,8 @@ CREATE TABLE clients (
     subscriber_email VARCHAR(255) NOT NULL,
     subscriber_name VARCHAR(255) NOT NULL,
     organization VARCHAR(255),
+    device_name VARCHAR(255),
+    platform ENUM('windows', 'macos', 'linux', 'other') NOT NULL,
     enrollment_token VARCHAR(255),
     subscription_id INT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1449,7 +1576,7 @@ private String sha256(String input) throws DeviceIdException {
 - Consider distribution-specific variations
 
 **Reference Implementation:**
-Complete working implementation for macOS with JDK 21+ features available in `ReferenceImplGuide.md`.
+Complete working implementation for macOS with JDK 25 features available in `ReferenceImplGuide.md`.
 
 ### 9.3 Certificate Management
 
@@ -1641,6 +1768,14 @@ public class AppConfig {
 - Emphasis on user experience for legitimate subscribers
 - Migration process provides legitimate device transfer path
 
+### Device Limit Enforcement
+
+Subscriptions include a device limit (1, 2, 5, etc.). Users cannot enroll additional devices once limit is reached. Users must explicitly revoke existing device certificates via portal to free up slots.
+
+**Device identification:** Users provide device name and platform during enrollment to identify devices in portal (e.g., "Work Laptop - Windows", "Home iMac - macOS"). Combined with enrollment date and last seen timestamp, this allows users to identify which device to revoke.
+
+**Attack mitigation:** Device limits prevent unlimited sharing. Revocation is manual and explicit, requiring portal authentication. Revoked certificates added to CRL immediately.
+
 ### 10.3 Threat Mitigation
 
 **Token Extraction:**
@@ -1709,7 +1844,7 @@ License Server Keys (JWT Signing):
   - Certificate storage and management
 
 **Client Requirements:**
-- Java 17+ (LTS) or Java 21+ (recommended)
+- Java 17+ (LTS) or Java 21+ (recommended) (reference implementation uses Java 25)
 - Platform-specific secure storage:
   - Windows: Certificate Store access
   - macOS: Keychain Services access
@@ -1941,6 +2076,9 @@ License Server Keys (JWT Signing):
 | 1013 | Enrollment token already used | Request new token |
 | 1014 | CSR validation failed | Generate new CSR with valid parameters |
 | 1015 | Account deletion failed | Contact support |
+| 1016 | Rate limit exceeded for enrollment tokens | Wait 24 hours or contact support |
+| 1017 | No active subscription for enrollment | Verify subscription status in portal |
+| 1018 | Device limit reached | Revoke an existing device in portal before enrolling new device |
 | **License Layer Errors** |
 | 2001 | License not activated | Activate license with valid subscription |
 | 2002 | Subscription expired | Renew subscription |
@@ -2210,7 +2348,7 @@ The system is designed for production deployment with comprehensive monitoring, 
 
 **Reference Implementation:**
 Complete working code examples for Java client (macOS) and PHP server are available in `ReferenceImplGuide.md`, including:
-- JDK 21+ implementation with modern Java features
+- JDK 25 implementation with modern Java features
 - Containerized server deployment
 - Build scripts and packaging
 - Testing examples

@@ -78,7 +78,7 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
 - Private CA infrastructure setup
 
 **Client Requirements:**
-- Platform-specific development environment (Flutter, Java, Swift, etc.)
+- Platform-specific development environment 
 - OpenSSL libraries for certificate operations
 - Secure storage APIs (Keychain, KeyStore, etc.)
 
@@ -216,18 +216,6 @@ New Device:
 
 ## Platform-Specific Implementation
 
-### Flutter (Multi-platform)
-```dart
-// Use platform channels for native certificate operations
-// See client/flutter/lib/certificate_manager.dart
-
-// Windows: Windows Certificate Store
-// macOS: Keychain Services
-// Linux: Encrypted file storage
-// Android: Android Keystore
-// iOS: Secure Enclave
-```
-
 ### Java (Desktop)
 ```java
 // Cross-platform KeyStore abstraction
@@ -236,12 +224,6 @@ New Device:
 // Windows: KeyStore.getInstance("Windows-MY")
 // macOS: Native Keychain via JNA
 // Linux: Custom encrypted storage
-```
-
-### Swift (macOS/iOS)
-```swift
-// Keychain Services with Secure Enclave
-// See client/swift/CertificateManager.swift
 ```
 
 ## Monitoring & Operations
