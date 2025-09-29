@@ -112,7 +112,7 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
    ```
 
 4. **Configure Web Server**
-   - See `docs/server-setup.md` for Apache/Nginx configuration
+   - See spec.md for Apache/Nginx configuration examples
    - Configure dual authentication modes:
      - TLS-only for certificate enrollment endpoints
      - mTLS for all license operation endpoints
@@ -267,11 +267,17 @@ New Device:
 
 ## Documentation
 
-- **[Design Document](spec.md)** - Complete technical specification
-- **[API Reference](docs/api.md)** - Endpoint documentation
-- **[Security Model](docs/security.md)** - Detailed security analysis
-- **[Deployment Guide](docs/deployment.md)** - Production setup
-- **[Client SDK Guide](docs/client-sdk.md)** - Implementation examples
+**[Complete Specification (spec.md)](spec.md)** - Comprehensive technical documentation including:
+- System architecture and security model
+- Certificate and license workflows
+- Client certificate enrollment process
+- API endpoint specifications
+- Server implementation (PHP)
+- Client implementation examples
+- Database schema
+- Security considerations
+- Deployment and operational procedures
+- Error codes and troubleshooting
 
 ## Error Codes
 
@@ -295,9 +301,9 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 ## Support
 
-- **Documentation**: See `docs/` directory
+- **Documentation**: See [spec.md](spec.md) for complete technical specification
 - **Issues**: GitHub issue tracker
-- **Security**: security@example.com
+- **Security**: alan@whitemail.net
 
 ## Roadmap
 
