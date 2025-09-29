@@ -86,61 +86,29 @@ sub-lic-spec/
 │   ├── docker-compose.yml
 │   └── README.md
 │
-├── client/                          # Client Implementations
-│   ├── java-desktop/               # Java Desktop Reference Client
-│   │   ├── src/
-│   │   │   └── main/
-│   │   │       └── java/
-│   │   │           └── com/
-│   │   │               └── licenseserver/
-│   │   │                   └── client/
-│   │   │                       ├── CertificateManager.java
-│   │   │                       ├── LicenseManager.java
-│   │   │                       ├── DeviceIdentifier.java
-│   │   │                       ├── EnrollmentManager.java
-│   │   │                       ├── MigrationManager.java
-│   │   │                       ├── platform/
-│   │   │                       │   ├── WindowsCertStore.java
-│   │   │                       │   ├── MacOSKeychain.java
-│   │   │                       │   └── LinuxCertStore.java
-│   │   │                       └── ui/
-│   │   │                           ├── MainWindow.java
-│   │   │                           ├── EnrollmentDialog.java
-│   │   │                           └── MigrationDialog.java
-│   │   ├── resources/
-│   │   │   ├── ca-chain.pem        # Embedded CA certificates
-│   │   │   ├── license-server.pub  # Embedded license public key
-│   │   │   └── config.properties
-│   │   ├── pom.xml
-│   │   └── README.md
-│   │
-│   └── flutter/                    # Flutter Multi-platform Client
-│       ├── lib/
-│       │   ├── main.dart
-│       │   ├── services/
-│       │   │   ├── certificate_manager.dart
-│       │   │   ├── license_manager.dart
-│       │   │   ├── device_identifier.dart
-│       │   │   └── api_client.dart
-│       │   ├── platform_channels/
-│       │   │   └── certificate_channel.dart
-│       │   └── ui/
-│       │       ├── enrollment_screen.dart
-│       │       ├── license_status_screen.dart
-│       │       └── migration_screen.dart
-│       ├── android/
-│       │   └── app/
-│       │       └── src/
-│       │           └── main/
-│       │               └── kotlin/
-│       │                   └── CertificatePlugin.kt
-│       ├── ios/
-│       │   └── Runner/
-│       │       └── CertificatePlugin.swift
-│       ├── macos/
-│       ├── windows/
-│       ├── linux/
-│       ├── pubspec.yaml
+├── client/                          # macOS Client Implementation
+│   └── macos-java/                 # Java macOS Client
+│       ├── src/
+│       │   └── main/
+│       │       └── java/
+│       │           └── com/
+│       │               └── licenseserver/
+│       │                   └── client/
+│       │                       ├── CertificateManager.java
+│       │                       ├── LicenseManager.java
+│       │                       ├── DeviceIdentifier.java
+│       │                       ├── EnrollmentManager.java
+│       │                       ├── MigrationManager.java
+│       │                       ├── KeychainManager.java
+│       │                       └── ui/
+│       │                           ├── MainWindow.java
+│       │                           ├── EnrollmentDialog.java
+│       │                           └── MigrationDialog.java
+│       ├── resources/
+│       │   ├── ca-chain.pem        # Embedded CA certificates
+│       │   ├── license-server.pub  # Embedded license public key
+│       │   └── config.properties
+│       ├── pom.xml
 │       └── README.md
 │
 └── docs/
@@ -153,17 +121,35 @@ sub-lic-spec/
 
 ## 2. Development Environment Setup
 
-### Server Development Environment
+### Server Development Environment (macOS)
 
 **Prerequisites:**
-- PHP 8.1+ with extensions: openssl, pdo_mysql, json, mbstring
-- MySQL 8.0+ or PostgreSQL 13+
-- Composer 2.x
-- Docker & Docker Compose (optional but recommended)
+- macOS 12.0 (Monterey) or later
+- Homebrew package manager
+- Docker Desktop for Mac
 
 **Setup Steps:**
 
 ```bash
+# Install Homebrew (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install PHP 8.1+ with required extensions
+brew install php@8.1
+brew install composer
+
+# Install MySQL
+brew install mysql@8.0
+brew services start mysql@8.0
+
+# Secure MySQL installation
+mysql_secure_installation
+
+# Install Docker Desktop for Mac
+# Download from https://www.docker.com/products/docker-desktop
+# Or install via Homebrew
+brew install --cask docker
+
 # Clone repository
 git clone https://github.com/yourusername/sub-lic-spec.git
 cd sub-lic-spec/server
@@ -186,21 +172,45 @@ php migrate.php
 # Seed test data (optional)
 php seed.php
 
-# Start development server (if not using Docker)
-php -S localhost:8000 -t public/
+# Access the application
+# TLS endpoint: https://localhost:8443
+# mTLS endpoint: https://localhost:9443
 ```
 
-### Client Development Environment (Java)
+**Note on Docker for macOS:**
+- Docker Desktop for Mac runs a lightweight Linux VM that hosts Docker containers
+- All file system operations use bind mounts that work seamlessly with macOS
+- Port forwarding is handled automatically
+- The PHP application runs in a Linux container but is fully accessible from macOS
+- MySQL database runs in a separate container with persistent volumes
+- All development tools (composer, php cli) can run natively on macOS or in containers
+
+### Client Development Environment (macOS)
 
 **Prerequisites:**
-- JDK 11+
-- Maven 3.6+
-- IDE with Java support (IntelliJ IDEA, Eclipse, VS Code)
+- macOS 12.0 (Monterey) or later
+- JDK 17+ (recommended: Temurin or Oracle JDK)
+- Maven 3.8+
+- Xcode Command Line Tools (for native integrations)
 
 **Setup Steps:**
 
 ```bash
-cd client/java-desktop
+# Install JDK
+brew install openjdk@17
+
+# Add JDK to path
+echo 'export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# Install Maven
+brew install maven
+
+# Install Xcode Command Line Tools (for JNA native access)
+xcode-select --install
+
+# Navigate to client directory
+cd client/macos-java
 
 # Install dependencies
 mvn clean install
@@ -213,31 +223,6 @@ mvn exec:java -Dexec.mainClass="com.licenseserver.client.Main"
 
 # Build distributable package
 mvn package
-```
-
-### Client Development Environment (Flutter)
-
-**Prerequisites:**
-- Flutter SDK 3.0+
-- Dart SDK 3.0+
-- Platform-specific tools (Xcode for iOS/macOS, Android Studio for Android)
-
-**Setup Steps:**
-
-```bash
-cd client/flutter
-
-# Get dependencies
-flutter pub get
-
-# Run on desktop
-flutter run -d windows  # or macos, linux
-
-# Run on mobile
-flutter run -d android  # or ios
-
-# Build release
-flutter build windows  # or macos, linux, apk, ios
 ```
 
 ---
@@ -319,22 +304,21 @@ MAIL_PASSWORD=
 MAIL_FROM_ADDRESS=noreply@license-server.com
 ```
 
-### Client Configuration (Java)
+### Client Configuration (Java/macOS)
 
-**File: `client/java-desktop/src/main/resources/config.properties`**
+**File: `client/macos-java/src/main/resources/config.properties`**
 
 ```properties
 # License Server
 license.server.url=https://license-server.local:8443
 license.server.verify.ssl=true
 
-# Certificate Storage
-cert.store.windows=Windows-MY
-cert.store.macos=KeychainStore
-cert.store.linux.path=${user.home}/.config/license-client/certs
+# Certificate Storage (macOS Keychain)
+cert.keychain.name=login
+cert.keychain.label=License Client Certificate
 
 # License Storage
-license.storage.path=${user.home}/.config/license-client
+license.storage.path=${user.home}/Library/Application Support/LicenseClient
 license.storage.encrypted=true
 
 # Renewal
@@ -347,50 +331,51 @@ migration.token.validity.hours=24
 
 # Logging
 log.level=INFO
-log.path=${user.home}/.config/license-client/logs
+log.path=${user.home}/Library/Logs/LicenseClient
 
 # UI
 ui.theme=system
 ui.notifications.enabled=true
-ui.minimize.to.tray=true
+ui.dock.icon=true
 ```
 
-### Client Configuration (Flutter)
+**File: `client/macos-java/src/main/java/com/licenseserver/client/config/AppConfig.java`**
 
-**File: `client/flutter/lib/config/app_config.dart`**
+```java
+package com.licenseserver.client.config;
 
-```dart
-class AppConfig {
-  static const String licenseServerUrl = String.fromEnvironment(
-    'LICENSE_SERVER_URL',
-    defaultValue: 'https://license-server.local:8443',
-  );
-  
-  static const bool verifySSL = bool.fromEnvironment(
-    'VERIFY_SSL',
-    defaultValue: true,
-  );
-  
-  static const int renewalCheckDays = 7;
-  static const int renewalCheckIntervalHours = 24;
-  
-  static const int migrationTokenValidityHours = 24;
-  
-  // Embedded CA certificate chain (Base64 encoded)
-  static const String caCertificateChain = '''
+public class AppConfig {
+    public static final String LICENSE_SERVER_URL = System.getProperty(
+        "license.server.url",
+        "https://license-server.local:8443"
+    );
+    
+    public static final boolean VERIFY_SSL = Boolean.parseBoolean(
+        System.getProperty("license.server.verify.ssl", "true")
+    );
+    
+    public static final int RENEWAL_CHECK_DAYS = 7;
+    public static final int RENEWAL_CHECK_INTERVAL_HOURS = 24;
+    
+    public static final int MIGRATION_TOKEN_VALIDITY_HOURS = 24;
+    
+    // Embedded CA certificate chain (PEM format)
+    public static final String CA_CERTIFICATE_CHAIN = """
 -----BEGIN CERTIFICATE-----
 MIIFxTCCA62gAwIBAgIUABCDEFGHIJKLMNOPQRSTUVWXYZab...
 -----END CERTIFICATE-----
-''';
-  
-  // Embedded license server public key (Base64 encoded)
-  static const String licenseServerPublicKey = '''
+-----BEGIN CERTIFICATE-----
+MIIFyTCCA7GgAwIBAgIUZabcdefghijklmnopqrstuvwxyz...
+-----END CERTIFICATE-----
+""";
+    
+    // Embedded license server public key (PEM format)
+    public static final String LICENSE_SERVER_PUBLIC_KEY = """
 -----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
 -----END PUBLIC KEY-----
-''';
+""";
 }
-```
 
 ---
 
