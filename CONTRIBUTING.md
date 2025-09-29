@@ -1,6 +1,6 @@
-# Contributing to Subscription Licensing System
+# Contributing to Subscription Licensing System Specification
 
-Thank you for your interest in contributing to this project! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to this project! This repository contains the design specification for a subscription licensing system with certificate authentication.
 
 ## Code of Conduct
 
@@ -23,257 +23,216 @@ We are committed to providing a welcoming and inclusive environment for all cont
 - Publishing others' private information without permission
 - Other conduct which could reasonably be considered inappropriate
 
+## About This Repository
+
+This repository contains the **design specification** for a subscription licensing system. It does not contain implementation code. The specification documents:
+
+- System architecture and security model
+- Certificate and license workflows
+- API endpoint specifications
+- Database schema designs
+- Implementation guidelines
+
 ## How to Contribute
 
-### Reporting Bugs
+### Reporting Issues
 
-Before creating a bug report, please check existing issues to avoid duplicates.
+Found a problem with the specification? Please open an issue:
 
-**When filing a bug report, include:**
-- A clear and descriptive title
-- Detailed steps to reproduce the issue
-- Expected behavior vs. actual behavior
-- Platform/environment details (OS, PHP version, etc.)
-- Relevant logs or error messages
-- Screenshots if applicable
+**Include:**
+- Which section of the spec has the issue
+- Description of the problem (ambiguity, error, missing information)
+- Suggested correction or clarification
+- Impact on implementation (if applicable)
 
-### Suggesting Enhancements
+**Examples of valid issues:**
+- "Section 8.2: PHP code example has syntax error"
+- "Section 5.1: Device ID generation unclear for Android"
+- "Section 3: Security model doesn't address certificate pinning"
+- "Database schema missing index on frequently-queried column"
 
-Enhancement suggestions are welcome! Please provide:
-- A clear and descriptive title
-- Detailed description of the proposed functionality
-- Use cases and benefits
-- Potential implementation approach (optional)
-- Any relevant examples from other projects
+### Suggesting Improvements
 
-### Security Vulnerabilities
+Enhancement suggestions for the specification are welcome:
 
-**DO NOT** open public issues for security vulnerabilities. Instead, email details to:
-- **Security Contact**: alan@whitemail.net
+**Include:**
+- Clear description of the proposed addition/change
+- Rationale (why it improves the system)
+- Security implications (if any)
+- Implementation complexity considerations
+- Alternative approaches considered
+
+**Examples:**
+- "Add hardware attestation flow to certificate enrollment"
+- "Specify rate limiting for API endpoints"
+- "Add sequence diagram for error recovery scenarios"
+- "Include load balancing considerations for multi-server deployments"
+
+### Security Considerations
+
+If you've identified a security flaw in the **design specification**:
+
+**For minor issues**: Open a GitHub issue
+**For serious vulnerabilities**: Email alan@whitemail.net
 
 Include:
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
+- Description of the security concern
+- Potential attack vector
+- Suggested mitigation
+- References to relevant security standards (if applicable)
 
-## Development Process
+### Documentation Improvements
 
-### Getting Started
+Help make the specification clearer:
 
-1. **Fork the repository**
-   ```bash
-   git clone https://github.com/yourusername/sub-lic-spec.git
-   cd sub-lic-spec
-   ```
+- Fix typos and grammar
+- Add clarifying examples
+- Improve diagrams
+- Add cross-references between sections
+- Clarify ambiguous descriptions
 
-2. **Create a feature branch**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
+## Contribution Process
 
-3. **Make your changes**
-   - Follow the coding standards below
-   - Add tests for new functionality
-   - Update documentation as needed
+### Small Changes (Typos, Grammar, Minor Clarifications)
 
-4. **Commit your changes**
-   ```bash
-   git commit -m "Brief description of changes"
-   ```
+1. Fork the repository
+2. Create a branch: `git checkout -b fix/typo-section-8`
+3. Make your changes to `spec.md` or `README.md`
+4. Commit: `git commit -m "Fix typo in certificate enrollment section"`
+5. Push and open a Pull Request
 
-5. **Push to your fork**
-   ```bash
-   git push origin feature/your-feature-name
-   ```
+### Larger Changes (New Sections, Architectural Changes)
 
-6. **Open a Pull Request**
+1. **Open an issue first** to discuss the proposed change
+2. Wait for feedback from maintainers
+3. Once approved, follow the same fork/branch/PR process
+4. Include detailed explanation in PR description
 
-### Pull Request Guidelines
-
-**Before submitting:**
-- Ensure code follows project coding standards
-- All tests pass
-- Documentation is updated
-- Commit messages are clear and descriptive
+## Pull Request Guidelines
 
 **PR Description should include:**
 - Summary of changes
 - Motivation and context
-- Related issue numbers (if applicable)
-- Testing performed
-- Screenshots (for UI changes)
+- Related issue number (if applicable)
+- Impact on other sections of the spec
+- Any breaking changes to the design
 
-### Commit Message Guidelines
+**Before submitting:**
+- Ensure markdown formatting is correct
+- Check that all links work
+- Verify code examples are syntactically correct
+- Update table of contents if you added/removed sections
+- Run a spell check
 
-Use clear, concise commit messages:
+### Commit Message Format
 
 ```
-[Component] Brief description
+[Section] Brief description
 
-Detailed explanation of what changed and why.
+Detailed explanation if needed.
 
 Fixes #123
 ```
 
 **Examples:**
 ```
-[Server] Add certificate revocation endpoint
+[Section 4.1] Clarify certificate enrollment token validation
 
-Implements CRL-based revocation for account deletion.
-Includes database migration and API endpoint.
+Added details about token expiration handling and
+database transaction requirements.
 
 Fixes #45
 ```
 
 ```
-[Client] Improve offline license validation
+[Section 10] Add DDoS protection considerations
 
-Adds grace period handling and better error messages
-for expired subscriptions.
+Includes rate limiting recommendations for all
+public-facing endpoints.
 ```
 
-## Coding Standards
+## Specification Style Guidelines
 
-### PHP (Server)
+### Writing Style
 
-- Follow PSR-12 coding standard
-- Use meaningful variable and function names
-- Add PHPDoc comments for classes and methods
-- Keep functions focused and under 50 lines when possible
-- Use type hints for parameters and return values
+- Use clear, concise technical language
+- Define acronyms on first use
+- Use active voice where possible
+- Be specific rather than vague
+- Include "why" along with "what" and "how"
 
-**Example:**
-```php
-/**
- * Validates an enrollment token and returns user details
- * 
- * @param string $token The enrollment token to validate
- * @return array User and subscription details
- * @throws InvalidTokenException If token is invalid or expired
- */
-public function validateToken(string $token): array {
-    // Implementation
-}
-```
+### Code Examples
 
-### Java (Client)
+- Use realistic, working examples
+- Include error handling where relevant
+- Add comments for non-obvious logic
+- Specify language/framework versions where relevant
+- Ensure examples align with described architecture
 
-- Follow standard Java conventions
-- Use meaningful class and variable names
-- Add Javadoc comments for public methods
-- Keep methods focused and under 50 lines
-- Use proper exception handling
+### Diagrams
 
-### Flutter/Dart (Client)
+- Use Mermaid syntax for sequence diagrams and flowcharts
+- Keep diagrams focused on one concept
+- Use consistent terminology across diagrams
+- Include legend if using non-standard symbols
 
-- Follow Dart style guide
-- Use meaningful widget and variable names
-- Add documentation comments for public APIs
-- Keep widgets focused and composable
-- Use proper error handling
+### Database Schema
 
-### Database
+- Use standard SQL syntax
+- Include comments for complex relationships
+- Specify indexes explicitly
+- Document any denormalization decisions
 
-- Use descriptive table and column names
-- Add indexes for frequently queried columns
-- Include comments for complex queries
-- Use transactions for multi-step operations
-- Follow the existing schema patterns
+## Review Process
 
-### Documentation
-
-- Update spec.md for architectural changes
-- Keep README.md current with features
-- Add inline code comments for complex logic
-- Include examples for new APIs
-- Use clear, concise language
-
-## Testing
-
-### Server Tests
-
-```bash
-# Run PHP unit tests
-composer test
-
-# Run integration tests
-composer test:integration
-```
-
-### Client Tests
-
-```bash
-# Java tests
-mvn test
-
-# Flutter tests
-flutter test
-```
-
-### Test Coverage
-
-- Aim for >80% code coverage for new code
-- Include unit tests for business logic
-- Include integration tests for API endpoints
-- Test error conditions and edge cases
-
-## Project Structure
-
-```
-sub-lic-spec/
-├── spec.md              # Complete technical specification
-├── README.md            # Project overview
-├── LICENSE              # MIT License
-├── CONTRIBUTING.md      # This file
-├── server/              # PHP server implementation
-│   ├── api/            # API endpoints
-│   ├── services/       # Business logic
-│   └── tests/          # Server tests
-├── client/              # Client implementations
-│   ├── flutter/        # Flutter/Dart client
-│   ├── java/           # Java client
-│   └── swift/          # Swift client
-└── schema/              # Database schemas
-```
-
-## Code Review Process
-
-All contributions go through code review:
-
-1. **Automated checks** run on PR submission
-2. **Maintainer review** for code quality and architecture
-3. **Feedback addressed** by contributor
-4. **Approval and merge** by maintainer
-
-**Reviewers check for:**
-- Code quality and readability
-- Adherence to project standards
-- Test coverage
-- Documentation completeness
-- Security implications
-- Performance considerations
+1. **Automated checks**: Markdown linting, link validation
+2. **Maintainer review**: Technical accuracy, clarity, completeness
+3. **Discussion**: Back-and-forth on complex changes
+4. **Approval**: Once consensus reached
+5. **Merge**: Maintainer merges PR
 
 ## Areas for Contribution
 
-**Good first issues:**
-- Documentation improvements
-- Code comments and examples
-- Test coverage improvements
-- Bug fixes
+**Good first contributions:**
+- Fix typos and grammar
+- Add clarifying examples
+- Improve existing diagrams
+- Add cross-references
 
-**Advanced contributions:**
-- New platform support (Android, iOS native)
-- Performance optimizations
-- Security enhancements
-- Feature implementations from roadmap
+**More involved contributions:**
+- Add missing error scenarios
+- Expand platform-specific sections
+- Add security threat analysis
+- Improve API specifications
+- Add operational runbooks
+
+**Major contributions:**
+- New architectural patterns
+- Additional platform support designs
+- Integration with other systems
+- Performance optimization strategies
+
+## Implementation Projects
+
+If you implement this specification in code:
+
+1. **Let us know!** Open an issue to share your implementation
+2. Consider contributing implementation notes back to this spec
+3. Share lessons learned that could improve the design
+4. Link to your implementation repository
+
+We'd love to know about:
+- Server implementations (PHP, Node.js, Python, etc.)
+- Client implementations (Flutter, Java, Swift, Kotlin, etc.)
+- Complete working systems
+- Partial implementations or proof-of-concepts
 
 ## Questions?
 
-If you have questions about contributing:
 - Check existing issues and discussions
-- Review the [spec.md](spec.md) documentation
-- Email: alan@whitemail.net
+- Review the complete [spec.md](spec.md)
+- Open a discussion for general questions
+- Email: alan@whitemail.net for private inquiries
 
 ## License
 
@@ -281,4 +240,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to the Subscription Licensing System!
+Thank you for helping improve the Subscription Licensing System specification!
