@@ -8,7 +8,7 @@
 5. [Device Identification](#5-device-identification)
 6. [License Management Workflow](#6-license-management-workflow)
 7. [License Migration System](#7-license-migration-system)
-8. [Server Implementation (PHP)](#8-server-implementation-php)
+8. [Server Implementation](#8-server-implementation)
 9. [Client Implementation](#9-client-implementation)
 10. [Security Considerations](#10-security-considerations)
 11. [Operational Considerations](#11-operational-considerations)
@@ -30,7 +30,7 @@ The system uses a two-layer security architecture:
 - **Subscription-based licensing**: Monthly and annual subscription models
 - **Extended offline operation**: Full subscription period offline capability
 - **Grace period support**: 5 days for monthly, 14 days for annual subscriptions
-- **Multi-platform support**: Windows, macOS, and Linux
+- **Multi-platform design**: Windows, macOS, and Linux (reference implementation: macOS)
 - **License migration**: Secure device transfer for hardware upgrades
 - **Private CA infrastructure**: Hierarchical certificate authority
 - **Mutual authentication**: X.509 certificates for both client and server identity
@@ -242,341 +242,164 @@ sequenceDiagram
     LSM->>C: License Response (mTLS)
 ```
 
-### 4.2 Customer Portal Integration
+### 4.2 Enrollment Token Service Interface
 
-**Portal-Based Token Generation:**
+**Token Generation:**
 ```php
-class PortalEnrollmentService {
-    private $db;
-    private $userSession;
+interface IEnrollmentTokenService {
+    /**
+     * Generate single-use enrollment token for certificate provisioning
+     * @param int $userId - User ID from portal session
+     * @return array {token: string, expires_at: datetime, instructions: string}
+     * @throws ExistingTokenException if user has unused token
+     */
+    public function generateEnrollmentToken(int $userId): array;
     
-    public function generateEnrollmentToken($userId) {
-        // Verify user is authenticated and has valid subscription
-        $user = $this->validateUserAccess($userId);
-        
-        // Check for existing unused tokens
-        $existingToken = $this->getUnusedToken($userId);
-        if ($existingToken) {
-            throw new ExistingTokenException('You already have an unused enrollment token');
-        }
-        
-        // Generate new token
-        $token = $this->generateSecureToken();
-        $expiresAt = new DateTime('+7 days');
-        
-        // Store token linked to user account
-        $stmt = $this->db->prepare("
-            INSERT INTO enrollment_tokens 
-            (token, user_id, subscriber_email, subscriber_name, organization, 
-             subscription_type, subscription_id, expires_at, max_uses, used_count, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NOW())
-        ");
-        
-        $stmt->execute([
-            $token,
-            $user['id'],
-            $user['email'],
-            $user['full_name'],
-            $user['organization'],
-            $user['subscription_type'],
-            $user['subscription_id'],
-            $expiresAt->format('Y-m-d H:i:s')
-        ]);
-        
-        // Log token generation for audit
-        $this->auditLog->record('enrollment_token_generated', $userId, [
-            'token_id' => $this->db->lastInsertId(),
-            'subscription_id' => $user['subscription_id']
-        ]);
-        
-        return [
-            'token' => $token,
-            'expires_at' => $expiresAt->format('c'),
-            'instructions' => $this->getDownloadInstructions(),
-            'subscription_type' => $user['subscription_type']
-        ];
-    }
+    /**
+     * Validate enrollment token and return user context
+     * @param string $token - Token submitted by client
+     * @return array User and subscription details
+     * @throws InvalidTokenException if token invalid/expired/used
+     */
+    public function validateToken(string $token): array;
     
-    private function generateSecureToken() {
-        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-    }
+    /**
+     * Mark token as used after certificate issuance
+     * @param string $token
+     * @param string $certificateFingerprint - SHA256 of issued cert
+     */
+    public function markTokenUsed(string $token, string $certificateFingerprint): void;
 }
 ```
 
-### 4.3 Enhanced Token Validation
+### 4.3 Certificate Authority Service Interface
 
-**Server-Side Token Validation with User Context:**
+**Certificate Issuance:**
 ```php
-class EnrollmentTokenService {
-    private $db;
+interface IPrivateCAService {
+    /**
+     * Issue client certificate from CSR
+     * @param string $csrPem - Certificate Signing Request in PEM format
+     * @param string $subject - Distinguished Name (CN, O, OU)
+     * @param array $options - Certificate options (keyUsage, validityPeriod)
+     * @return string Certificate in PEM format
+     */
+    public function issueCertificate(
+        string $csrPem, 
+        string $subject, 
+        array $options
+    ): string;
     
-    public function validateToken($token) {
-        $stmt = $this->db->prepare("
-            SELECT et.*, u.email, u.full_name, u.organization, 
-                   s.subscription_type, s.end_date as subscription_end
-            FROM enrollment_tokens et
-            JOIN users u ON et.user_id = u.id
-            JOIN subscriptions s ON et.subscription_id = s.id
-            WHERE et.token = ? 
-            AND et.expires_at > NOW() 
-            AND et.used_count < et.max_uses
-            AND s.status = 'active'
-            AND s.end_date > NOW()
-        ");
-        
-        $stmt->execute([$token]);
-        $tokenRecord = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$tokenRecord) {
-            throw new InvalidTokenException('Token is invalid, expired, or subscription inactive');
-        }
-        
-        return $tokenRecord;
-    }
+    /**
+     * Get CA certificate chain for client validation
+     * @return array ['root_ca' => string, 'intermediate_ca' => string]
+     */
+    public function getCertificateChain(): array;
     
-    public function markTokenUsed($token, $certificateFingerprint) {
-        $this->db->beginTransaction();
-        
-        try {
-            $stmt = $this->db->prepare("
-                UPDATE enrollment_tokens 
-                SET used_count = used_count + 1, used_at = NOW(),
-                    certificate_fingerprint = ?
-                WHERE token = ?
-            ");
-            $stmt->execute([$certificateFingerprint, $token]);
-            
-            $this->auditLog->record('enrollment_token_used', null, [
-                'token' => $token,
-                'certificate_fingerprint' => $certificateFingerprint
-            ]);
-            
-            $this->db->commit();
-            
-        } catch (Exception $e) {
-            $this->db->rollback();
-            throw $e;
-        }
-    }
+    /**
+     * Revoke certificate (account deletion)
+     * @param string $serialNumber - Certificate serial number
+     * @param string $reason - Revocation reason
+     * @param DateTime $revokedAt - Revocation timestamp
+     */
+    public function revokeCertificate(
+        string $serialNumber,
+        string $reason,
+        DateTime $revokedAt
+    ): void;
 }
 ```
 
-### 4.4 Client-Side Enrollment Implementation
+### 4.4 CA Setup Commands
 
-**Cross-Platform CSR Generation:**
-```java
-public class CertificateEnrollmentManager {
-    
-    public EnrollmentResult enrollWithToken(String enrollmentToken) {
-        try {
-            // Generate key pair
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
-            keyGen.initialize(2048);
-            KeyPair keyPair = keyGen.generateKeyPair();
-            
-            // Create CSR
-            X500Name subject = buildSubjectFromToken(enrollmentToken);
-            PKCS10CertificationRequest csr = generateCSR(keyPair, subject);
-            
-            // Submit to server
-            CertificateResponse response = submitEnrollmentRequest(enrollmentToken, csr);
-            
-            // Install certificate
-            installCertificate(response.getCertificate(), keyPair.getPrivate());
-            
-            return EnrollmentResult.success(response.getCertificate());
-            
-        } catch (Exception e) {
-            return EnrollmentResult.failure(e.getMessage());
-        }
-    }
-    
-    private PKCS10CertificationRequest generateCSR(KeyPair keyPair, X500Name subject) {
-        PKCS10CertificationRequestBuilder builder = 
-            new JcaPKCS10CertificationRequestBuilder(subject, keyPair.getPublic());
-        
-        // Add extensions
-        ExtensionsGenerator extensionsGenerator = new ExtensionsGenerator();
-        extensionsGenerator.addExtension(Extension.keyUsage, true, 
-            new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
-        extensionsGenerator.addExtension(Extension.extendedKeyUsage, true,
-            new ExtendedKeyUsage(KeyPurposeId.id_kp_clientAuth));
-        
-        builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest,
-            extensionsGenerator.generate());
-        
-        ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
-            .build(keyPair.getPrivate());
-        
-        return builder.build(signer);
-    }
-}
+**Root CA Initialization (Offline):**
+```bash
+# Generate Root CA private key (4096-bit RSA, AES-256 encrypted)
+openssl genrsa -aes256 -out root-ca.key 4096
+
+# Create Root CA certificate (20-year validity)
+openssl req -new -x509 \
+    -key root-ca.key \
+    -days 7300 \
+    -sha256 \
+    -extensions v3_ca \
+    -out root-ca.crt \
+    -subj "/C=US/ST=State/L=City/O=Your Organization/OU=CA/CN=Root CA"
 ```
 
-### 4.5 Server-Side Certificate Issuance
+**Intermediate CA Setup (Online):**
+```bash
+# Generate Intermediate CA private key
+openssl genrsa -aes256 -out intermediate-ca.key 4096
 
-**Integration with Private CA:**
-```php
-class CertificateEnrollmentController {
-    private $tokenService;
-    private $caService;
-    private $licenseService;
-    
-    public function handleEnrollmentRequest($enrollmentToken, $csrPem) {
-        try {
-            // Validate enrollment token
-            $tokenRecord = $this->tokenService->validateToken($enrollmentToken);
-            
-            // Parse and validate CSR
-            $csr = $this->parseCSR($csrPem);
-            $this->validateCSR($csr);
-            
-            // Build certificate subject from user info
-            $subject = $this->buildCertificateSubject($tokenRecord);
-            
-            // Request certificate from Private CA
-            $certificate = $this->caService->issueCertificate($csr, $subject, [
-                'keyUsage' => 'digitalSignature,keyEncipherment',
-                'extendedKeyUsage' => 'clientAuth',
-                'validityPeriod' => '2 years'
-            ]);
-            
-            $clientFingerprint = $this->extractCertificateFingerprint($certificate);
-            $certSerial = $this->extractCertificateSerial($certificate);
-            
-            // Mark token as used
-            $this->tokenService->markTokenUsed($enrollmentToken, $clientFingerprint);
-            
-            // Create client record
-            $this->createClientRecord($clientFingerprint, $certSerial, $tokenRecord);
-            
-            // Generate initial JWT license token
-            $deviceId = $_POST['device_id'] ?? '';
-            $licenseToken = $this->licenseService->generateInitialLicense(
-                $clientFingerprint,
-                $certSerial,
-                $deviceId,
-                $tokenRecord
-            );
-            
-            return [
-                'certificate' => $certificate,
-                'ca_chain' => $this->caService->getCertificateChain(),
-                'license_token' => $licenseToken,
-                'subscription_info' => [
-                    'type' => $tokenRecord['subscription_type'],
-                    'expires' => $tokenRecord['subscription_end']
-                ]
-            ];
-            
-        } catch (Exception $e) {
-            throw new EnrollmentException('Certificate enrollment failed: ' . $e->getMessage());
-        }
-    }
-    
-    private function buildCertificateSubject($tokenRecord) {
-        return sprintf(
-            "CN=%s,OU=License Clients,O=%s",
-            $tokenRecord['full_name'],
-            $tokenRecord['organization'] ?? 'Licensed Users'
-        );
-    }
-}
+# Create CSR for Intermediate CA
+openssl req -new -sha256 \
+    -key intermediate-ca.key \
+    -out intermediate-ca.csr \
+    -subj "/C=US/ST=State/L=City/O=Your Organization/OU=CA/CN=Intermediate CA"
+
+# Sign Intermediate CA certificate with Root CA (10-year validity)
+openssl ca -config root-ca.cnf \
+    -extensions v3_intermediate_ca \
+    -days 3650 \
+    -notext \
+    -md sha256 \
+    -in intermediate-ca.csr \
+    -out intermediate-ca.crt
+
+# Create certificate chain file
+cat intermediate-ca.crt root-ca.crt > ca-chain.crt
 ```
 
-**Private CA Integration:**
-```php
-class PrivateCAService {
-    private $caPrivateKey;
-    private $caCertificate;
-    private $config;
-    
-    public function issueCertificate($csr, $subject, $options = []) {
-        // Create certificate from CSR
-        $cert = new X509Certificate();
-        $cert->setPublicKey($csr->getPublicKey());
-        $cert->setSubject($subject);
-        $cert->setIssuer($this->caCertificate->getSubject());
-        
-        // Set validity period (2 years)
-        $validityYears = $options['validityPeriod'] ?? '2 years';
-        $cert->setValidFrom(new DateTime());
-        $cert->setValidTo(new DateTime('+' . $validityYears));
-        
-        // Add extensions
-        $cert->addExtension('keyUsage', true, $options['keyUsage']);
-        $cert->addExtension('extendedKeyUsage', true, $options['extendedKeyUsage']);
-        $cert->addExtension('basicConstraints', true, 'CA:FALSE');
-        
-        // Add Authority Key Identifier
-        $cert->addExtension('authorityKeyIdentifier', false, 
-            $this->caCertificate->getSubjectKeyIdentifier());
-        
-        // Generate unique serial number
-        $cert->setSerialNumber($this->generateSerialNumber());
-        
-        // Sign certificate with Intermediate CA key
-        $cert->sign($this->caPrivateKey, 'sha256');
-        
-        // Store certificate in CA database
-        $this->storeCertificate($cert);
-        
-        return $cert->toPEM();
-    }
-    
-    public function getCertificateChain() {
-        return [
-            'root_ca' => file_get_contents($this->config['root_ca_path']),
-            'intermediate_ca' => file_get_contents($this->config['intermediate_ca_path'])
-        ];
-    }
-}
+**Client Certificate Issuance (2-year validity):**
+```bash
+# Issue client certificate from CSR
+openssl ca -config intermediate-ca.cnf \
+    -extensions client_cert \
+    -days 730 \
+    -notext \
+    -md sha256 \
+    -in client.csr \
+    -out client.crt
 ```
 
-### 4.6 Certificate Storage and Security
+### 4.5 License Signing Keys Setup
 
-**Platform-Specific Storage:**
+**Separate from CA Keys:**
+```bash
+# Generate license signing private key (2048-bit RSA for JWT)
+openssl genrsa -aes256 -out license-signing.key 2048
+
+# Extract public key (embedded in client applications)
+openssl rsa -in license-signing.key -pubout -out license-signing.pub
+```
+
+**Key Separation:**
+- CA keys: Used for certificate issuance only
+- License keys: Used for JWT signing only
+- Compromised license key does NOT compromise CA infrastructure
+
+### 4.6 Certificate Storage Strategy
+
+**Platform-Specific Secure Storage:**
 
 **Windows:**
-```java
-public class WindowsCertificateManager {
-    public void installCertificate(X509Certificate cert, PrivateKey privateKey) {
-        KeyStore windowsStore = KeyStore.getInstance("Windows-MY");
-        windowsStore.load(null, null);
-        windowsStore.setKeyEntry("license-client-cert", privateKey, null, 
-                                new Certificate[]{cert});
-    }
-    
-    public X509Certificate getClientCertificate() {
-        KeyStore windowsStore = KeyStore.getInstance("Windows-MY");
-        windowsStore.load(null, null);
-        return (X509Certificate) windowsStore.getCertificate("license-client-cert");
-    }
-}
-```
+- Primary: Windows Certificate Store (`certmgr.msc`)
+- Location: `Current User\Personal\Certificates`
+- Access: Windows CryptoAPI
+- Private key: Non-exportable, hardware-backed if TPM available
 
 **macOS:**
-```java
-public class MacOSCertificateManager {
-    public void installCertificate(X509Certificate cert, PrivateKey privateKey) {
-        // Use macOS Keychain Services
-        // Private key stored with kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        SecItemAdd(certificateAttributes);
-        SecItemAdd(privateKeyAttributes);
-    }
-}
-```
+- Primary: Keychain Services (`login.keychain`)
+- Access: `security` command-line tool or Security.framework
+- Private key: Access Control Lists (ACL), Touch ID integration possible
+- Attributes: `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
 
 **Linux:**
-```java
-public class LinuxCertificateManager {
-    public void installCertificate(X509Certificate cert, PrivateKey privateKey) {
-        // Store in ~/.config/app-name/certificates/
-        Files.write(Paths.get(certPath), cert.getEncoded());
-        storeEncryptedPrivateKey(privateKey);
-    }
-}
-```
+- Primary: Encrypted file storage in `~/.config/app-name/certificates/`
+- Encryption: AES-256 with key derived from user credentials
+- Permissions: `chmod 600` (owner read/write only)
+- Optional: Integration with GNOME Keyring or KWallet
 
 ### 4.7 Certificate Validation Workflow
 
@@ -663,131 +486,125 @@ sequenceDiagram
     P->>U: Account Deletion Confirmation
 ```
 
-**Portal Account Deletion Service:**
-```php
-class AccountDeletionService {
-    private $db;
-    private $caService;
-    private $crlService;
-    
-    public function deleteUserAccount($userId, $userConfirmation) {
-        $user = $this->validateUserDeletion($userId, $userConfirmation);
-        
-        $this->db->beginTransaction();
-        
-        try {
-            // Find all certificates
-            $certificates = $this->getUserCertificates($userId);
-            
-            // Revoke all certificates
-            foreach ($certificates as $cert) {
-                $this->revokeCertificate($cert, 'account_deletion');
-            }
-            
-            // Deactivate all licenses
-            $this->deactivateUserLicenses($userId);
-            
-            // Delete user data
-            $this->deleteUserData($userId);
-            
-            // Update CRL
-            $this->crlService->publishUpdatedCRL();
-            
-            $this->db->commit();
-            
-            return [
-                'success' => true,
-                'certificates_revoked' => count($certificates)
-            ];
-            
-        } catch (Exception $e) {
-            $this->db->rollback();
-            throw $e;
-        }
-    }
-    
-    private function revokeCertificate($certificate, $reason) {
-        $this->caService->revokeCertificate(
-            $certificate['serial_number'], 
-            $reason,
-            new DateTime()
-        );
-        
-        $stmt = $this->db->prepare("
-            UPDATE issued_certificates 
-            SET status = 'revoked', revoked_at = NOW(), revocation_reason = ?
-            WHERE serial_number = ?
-        ");
-        $stmt->execute([$reason, $certificate['serial_number']]);
-    }
-}
-```
-
 ## 5. Device Identification
 
-### 5.1 Cross-Platform Device ID Strategy
+### 5.1 Device ID Strategy
 
-**Hierarchical Approach (Most Stable First):**
+Device identification must be:
+- **Stable**: Survives OS updates and minor hardware changes
+- **Unique**: Different for each physical machine
+- **Accessible**: Obtainable without admin privileges
+- **Platform-native**: Uses OS-provided identifiers
+
+### 5.2 Platform-Specific Device ID Sources
 
 **Windows:**
-- Primary: `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography\MachineGuid`
-- Fallback: Motherboard serial + CPU ID combination
+- **Primary**: `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography\MachineGuid`
+  - Stable across OS reinstalls if same hardware
+  - Generated during Windows installation
+  - Accessible without admin rights
+- **Fallback**: Motherboard serial + CPU ID hash
+  - Use WMI queries: `Win32_BaseBoard.SerialNumber` + `Win32_Processor.ProcessorId`
+  - More stable than MAC addresses (network cards replaceable)
 
 **macOS:**
-- Primary: Hardware UUID from `system_profiler SPHardwareDataType`
-- Fallback: System serial number
+- **Primary**: Hardware UUID from `system_profiler SPHardwareDataType`
+  - Tied to logic board
+  - Stable across OS reinstalls
+  - Command: `system_profiler SPHardwareDataType | grep 'Hardware UUID'`
+- **Fallback**: System serial number from `ioreg`
+  - Command: `ioreg -l | grep IOPlatformSerialNumber`
 
 **Linux:**
-- Primary: `/etc/machine-id` or `/var/lib/dbus/machine-id`
-- Fallback: DMI product UUID from `/sys/class/dmi/id/product_uuid`
+- **Primary**: `/etc/machine-id` or `/var/lib/dbus/machine-id`
+  - Generated during system installation
+  - Persistent across reboots
+  - systemd standard
+- **Fallback**: DMI product UUID from `/sys/class/dmi/id/product_uuid`
+  - Requires root access in some distributions
+  - Hardware-based identifier
 
-### 5.2 Device ID Generation Logic
+### 5.3 Device ID Generation Algorithm
 
+```
+1. Attempt to read primary platform identifier
+2. If unavailable, attempt fallback identifier
+3. If both fail, generate error (do not create random ID)
+4. Hash identifier with SHA-256
+5. Prefix with "device_" for namespacing
+6. Result format: "device_" + 64-character hex string
+```
+
+**Example Output:**
+```
+device_a3c7f8e9d2b4c1a5f6e8d9c7b4a3e2f1a5c6d7e8f9a1b2c3d4e5f6a7b8c9d0e1f2
+```
+
+### 5.4 Device ID Client Implementation Strategy
+
+**Interface Design:**
 ```java
-public class DeviceIdentifier {
+public interface IDeviceIdentifier {
+    /**
+     * Generate stable device identifier for current platform
+     * @return String Device ID in format "device_{sha256_hash}"
+     * @throws DeviceIdException if identifier cannot be determined
+     */
+    String generateDeviceId() throws DeviceIdException;
     
-    public String generateDeviceId() {
-        String deviceId = getMachineId();
-        if (deviceId == null) deviceId = getHardwareFingerprint();
-        if (deviceId == null) deviceId = generateFallbackId();
+    /**
+     * Get raw platform identifier (for debugging)
+     * @return String Platform-specific identifier before hashing
+     */
+    String getRawPlatformIdentifier();
+}
+```
+
+**Platform Implementation Pattern:**
+```java
+public class DeviceIdentifierFactory {
+    public static IDeviceIdentifier create() {
+        String os = System.getProperty("os.name").toLowerCase();
         
-        return "device_" + sha256(deviceId);
-    }
-    
-    private String getMachineId() {
-        try {
-            switch (getOperatingSystem()) {
-                case WINDOWS:
-                    return getWindowsMachineGuid();
-                case MAC:
-                    return getMacHardwareUUID();
-                case LINUX:
-                    return getLinuxMachineId();
-                default:
-                    return null;
-            }
-        } catch (Exception e) {
-            return null;
+        if (os.contains("win")) {
+            return new WindowsDeviceIdentifier();
+        } else if (os.contains("mac")) {
+            return new MacOSDeviceIdentifier();
+        } else if (os.contains("nix") || os.contains("nux")) {
+            return new LinuxDeviceIdentifier();
+        } else {
+            throw new UnsupportedOperationException("Platform not supported: " + os);
         }
-    }
-    
-    private String getWindowsMachineGuid() {
-        return executeCommand("reg query HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid");
-    }
-    
-    private String getMacHardwareUUID() {
-        return executeCommand("system_profiler SPHardwareDataType | grep 'Hardware UUID'");
-    }
-    
-    private String getLinuxMachineId() {
-        String machineId = readFile("/etc/machine-id");
-        if (machineId == null) {
-            machineId = readFile("/var/lib/dbus/machine-id");
-        }
-        return machineId;
     }
 }
 ```
+
+**Each platform implementation provides:**
+1. Primary ID acquisition method
+2. Fallback ID acquisition method
+3. SHA-256 hashing
+4. Error handling for inaccessible identifiers
+
+**Reference implementation for macOS available in ReferenceImplGuide.md**
+
+### 5.5 Device ID Stability Considerations
+
+**What Should NOT Change Device ID:**
+- OS updates (major or minor)
+- Software installations
+- Network configuration changes
+- Drive upgrades (if primary identifier is hardware-based)
+- RAM upgrades
+- User account changes
+
+**What WILL Change Device ID:**
+- Motherboard replacement
+- Logic board replacement (macOS)
+- Complete OS reinstall with machine-id regeneration (Linux)
+- Registry MachineGuid regeneration (Windows - rare)
+
+**Migration Use Case:**
+When device ID must change (hardware upgrade), use the license migration system (Section 7) to transfer license to new device.
 
 ## 6. License Management Workflow
 
@@ -810,7 +627,59 @@ sequenceDiagram
     C->>C: Encrypt & Store Token with Device Key
 ```
 
-### 6.2 Offline License Validation
+### 6.2 License Token Service Interface
+
+**Token Generation and Management:**
+```php
+interface ILicenseTokenService {
+    /**
+     * Generate initial JWT license token after enrollment
+     * @param string $clientCertFingerprint - SHA256 of client certificate
+     * @param string $certSerial - Certificate serial number
+     * @param string $deviceId - Hardware device identifier
+     * @param array $subscription - Subscription details from database
+     * @return string JWT token (header.payload.signature)
+     */
+    public function generateInitialLicense(
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $deviceId,
+        array $subscription
+    ): string;
+    
+    /**
+     * Generate refreshed license token
+     * @param string $clientCertFingerprint
+     * @param string $certSerial
+     * @param string $deviceId
+     * @param array $subscription - Updated subscription data
+     * @return string JWT token
+     */
+    public function generateLicenseToken(
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $deviceId,
+        array $subscription
+    ): string;
+    
+    /**
+     * Calculate grace period end date
+     * @param string $subscriptionType - 'monthly' or 'annual'
+     * @param DateTime $subscriptionEnd
+     * @return DateTime Grace period end date
+     */
+    public function calculateGracePeriodEnd(
+        string $subscriptionType,
+        DateTime $subscriptionEnd
+    ): DateTime;
+}
+```
+
+**Grace Period Calculation:**
+- Monthly subscription: `subscription_end + 5 days`
+- Annual subscription: `subscription_end + 14 days`
+
+### 6.3 Offline License Validation
 
 ```mermaid
 flowchart TD
@@ -833,7 +702,33 @@ flowchart TD
     O -->|No| Q[Continue in Grace Mode]
 ```
 
-### 6.3 Grace Period Behavior
+### 6.4 License Renewal Service Interface
+
+**Renewal Management:**
+```php
+interface ILicenseRenewalService {
+    /**
+     * Check for subscription renewal and issue new token
+     * @param string $clientCertFingerprint - From mTLS connection
+     * @param string $certSerial - Certificate serial number
+     * @param string $deviceId - Hardware device identifier
+     * @return array {
+     *   status: 'renewed'|'grace_period'|'expired'|'no_subscription',
+     *   token?: string,
+     *   subscription_end?: datetime,
+     *   grace_period_end?: datetime,
+     *   message: string
+     * }
+     */
+    public function checkForRenewal(
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $deviceId
+    ): array;
+}
+```
+
+### 6.5 Grace Period Behavior
 
 **Monthly Subscriptions (5-day grace):**
 - Days 1-5 after expiry: Full functionality with renewal attempts every 24 hours
@@ -868,12 +763,55 @@ sequenceDiagram
     LS->>ND: Return New License Token (mTLS)
 ```
 
-### 7.2 Migration Security
+### 7.2 Device Migration Service Interface
+
+**Migration Token Management:**
+```php
+interface IDeviceMigrationService {
+    /**
+     * Initiate license migration from current device
+     * @param string $clientCertFingerprint - From mTLS connection
+     * @param string $certSerial - Certificate serial number
+     * @param string $currentDeviceId - Device ID being migrated from
+     * @return array {
+     *   migration_token: string,
+     *   expires_at: datetime,
+     *   message: string
+     * }
+     * @throws InvalidLicenseException if no valid license found
+     * @throws CertificateMismatchException if cert doesn't match license
+     */
+    public function initiateLicenseMigration(
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $currentDeviceId
+    ): array;
+    
+    /**
+     * Complete license migration to new device
+     * @param string $migrationToken - Single-use migration token
+     * @param string $clientCertFingerprint - From mTLS connection
+     * @param string $certSerial - Certificate serial number
+     * @param string $newDeviceId - Device ID for new device
+     * @return string New JWT license token for new device
+     * @throws InvalidMigrationTokenException if token invalid/expired
+     * @throws CertificateMismatchException if cert doesn't match original
+     */
+    public function completeLicenseMigration(
+        string $migrationToken,
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $newDeviceId
+    ): string;
+}
+```
+
+### 7.3 Migration Security
 
 **Token Characteristics:**
 - Single-use migration tokens
 - 24-hour expiration window
-- Bound to specific client certificate
+- Bound to specific client certificate (validated via cert serial)
 - Automatic cleanup after use or expiry
 
 **User Experience:**
@@ -881,313 +819,124 @@ sequenceDiagram
 - Import: Simple code entry on new device
 - File-based transfer option for offline scenarios
 
-## 8. Server Implementation (PHP)
+**Migration Process Requirements:**
+1. Same client certificate must be installed on new device
+2. Old device license automatically deactivated upon completion
+3. New device receives fresh license token bound to new device ID
+4. Migration token cannot be reused
 
-### 8.1 Core Services
+## 8. Server Implementation
+
+### 8.1 Core Service Interfaces
 
 **Service Architecture:**
 
-The server implementation integrates Private CA services with license management services.
+The server implementation integrates Private CA services with license management services. All services operate over HTTPS with dual authentication modes:
+- **TLS-only**: Certificate enrollment endpoints (no client cert required yet)
+- **mTLS**: All license operations (client cert required)
 
 **Certificate Management Services:**
-- `PrivateCAService` - Issues certificates using Intermediate CA
-- `EnrollmentTokenService` - Manages web portal tokens
-- `CertificateValidator` - Validates client certificates via mTLS
-- `CRLService` - Manages Certificate Revocation Lists
+- `IPrivateCAService` - Issues certificates using Intermediate CA
+- `IEnrollmentTokenService` - Manages web portal tokens
+- `ICertificateValidator` - Validates client certificates via mTLS
+- `ICRLService` - Manages Certificate Revocation Lists
 
 **License Management Services:**
+- `ILicenseTokenService` - Generates and validates JWT license tokens (mTLS)
+- `ILicenseRenewalService` - Handles subscription renewals and grace periods (mTLS)
+- `IDeviceMigrationService` - Manages secure license transfers between devices (mTLS)
 
-**LicenseTokenService (mTLS Required):**
-```php
-class LicenseTokenService {
-    private $serverPrivateKey;
-    private $db;
-    
-    public function generateInitialLicense($clientCertFingerprint, $certSerial, $deviceId, $tokenRecord) {
-        $subscription = $this->getSubscriptionDetails($tokenRecord['subscription_id']);
-        
-        return $this->generateLicenseToken(
-            $clientCertFingerprint, 
-            $certSerial,
-            $deviceId, 
-            $subscription
-        );
-    }
-    
-    public function generateLicenseToken($clientCertFingerprint, $certSerial, $deviceId, $subscription) {
-        $header = json_encode(['typ' => 'JWT', 'alg' => 'RS256']);
-        
-        $subscriptionEnd = new DateTime($subscription['end_date']);
-        $gracePeriodEnd = $this->calculateGracePeriodEnd($subscription['subscription_type'], $subscriptionEnd);
-        
-        $payload = json_encode([
-            'sub' => $clientCertFingerprint,
-            'cert_serial' => $certSerial,
-            'device_id' => $deviceId,
-            'subscription_type' => $subscription['subscription_type'],
-            'subscription_id' => $subscription['id'],
-            'subscription_end' => $subscriptionEnd->getTimestamp(),
-            'grace_period_end' => $gracePeriodEnd->getTimestamp(),
-            'entitlements' => $this->getEntitlements($subscription),
-            'payment_status' => $subscription['payment_status'],
-            'iat' => time(),
-            'iss' => 'license-server.com'
-        ]);
-        
-        $headerEncoded = $this->base64UrlEncode($header);
-        $payloadEncoded = $this->base64UrlEncode($payload);
-        
-        $signature = '';
-        openssl_sign(
-            $headerEncoded . '.' . $payloadEncoded, 
-            $signature, 
-            $this->serverPrivateKey, 
-            OPENSSL_ALGO_SHA256
-        );
-        
-        $signatureEncoded = $this->base64UrlEncode($signature);
-        
-        return $headerEncoded . '.' . $payloadEncoded . '.' . $signatureEncoded;
-    }
-    
-    private function calculateGracePeriodEnd($subscriptionType, $subscriptionEnd) {
-        $graceDays = ($subscriptionType === 'monthly') ? 5 : 14;
-        $graceEnd = clone $subscriptionEnd;
-        $graceEnd->add(new DateInterval('P' . $graceDays . 'D'));
-        return $graceEnd;
-    }
-}
-```
+### 8.2 Web Server Configuration
 
-**LicenseRenewalService (mTLS Required):**
-```php
-class LicenseRenewalService {
-    private $db;
-    private $tokenService;
-    private $certificateValidator;
-    
-    public function checkForRenewal($clientCertFingerprint, $certSerial, $deviceId) {
-        // Validate certificate is still valid
-        if (!$this->certificateValidator->isCertificateActive($certSerial)) {
-            throw new RevokedCertificateException('Certificate is no longer valid');
-        }
-        
-        $subscription = $this->getSubscriptionStatus($clientCertFingerprint);
-        
-        if (!$subscription) {
-            return [
-                'status' => 'no_subscription',
-                'message' => 'No subscription found'
-            ];
-        }
-        
-        $now = new DateTime();
-        $subscriptionEnd = new DateTime($subscription['end_date']);
-        $gracePeriodEnd = $this->calculateGracePeriodEnd($subscription['subscription_type'], $subscriptionEnd);
-        
-        if ($subscription['payment_status'] === 'active' && $subscriptionEnd > $now) {
-            // Payment received - issue new token
-            $newToken = $this->tokenService->generateLicenseToken(
-                $clientCertFingerprint,
-                $certSerial,
-                $deviceId, 
-                $subscription
-            );
-            
-            $this->updateLicenseToken($clientCertFingerprint, $deviceId, $newToken);
-            
-            return [
-                'status' => 'renewed',
-                'token' => $newToken,
-                'subscription_end' => $subscriptionEnd->format('c')
-            ];
-        }
-        
-        if ($now < $gracePeriodEnd) {
-            return [
-                'status' => 'grace_period',
-                'grace_period_end' => $gracePeriodEnd->format('c'),
-                'message' => 'Subscription expired, in grace period'
-            ];
-        }
-        
-        return [
-            'status' => 'expired',
-            'message' => 'Subscription has expired'
-        ];
-    }
-}
-```
+**Dual Authentication Endpoints:**
 
-**DeviceMigrationService (mTLS Required):**
-```php
-class DeviceMigrationService {
-    private $db;
-    private $tokenService;
-    
-    public function initiateLicenseMigration($clientCertFingerprint, $certSerial, $currentDeviceId) {
-        $license = $this->findActiveLicense($clientCertFingerprint, $currentDeviceId);
-        if (!$license) {
-            throw new InvalidLicenseException('No valid license found for this device');
-        }
-        
-        if ($license['cert_serial_number'] !== $certSerial) {
-            throw new CertificateMismatchException('Certificate serial mismatch');
-        }
-        
-        $migrationToken = $this->generateSecureToken();
-        $expiresAt = new DateTime('+24 hours');
-        
-        $stmt = $this->db->prepare("
-            INSERT INTO license_migrations 
-            (migration_token, client_cert_fingerprint, cert_serial, 
-             old_device_id, expires_at, created_at) 
-            VALUES (?, ?, ?, ?, ?, NOW())
-        ");
-        
-        $stmt->execute([
-            $migrationToken,
-            $clientCertFingerprint,
-            $certSerial,
-            $currentDeviceId,
-            $expiresAt->format('Y-m-d H:i:s')
-        ]);
-        
-        return [
-            'migration_token' => $migrationToken,
-            'expires_at' => $expiresAt->format('c'),
-            'message' => 'Migration token valid for 24 hours'
-        ];
-    }
-    
-    public function completeLicenseMigration($migrationToken, $clientCertFingerprint, $certSerial, $newDeviceId) {
-        $migration = $this->getMigrationRecord($migrationToken);
-        
-        if (!$migration || $migration['expires_at'] < new DateTime()) {
-            throw new InvalidMigrationTokenException('Token is invalid or expired');
-        }
-        
-        if ($migration['client_cert_fingerprint'] !== $clientCertFingerprint) {
-            throw new CertificateMismatchException('Certificate mismatch');
-        }
-        
-        if ($migration['cert_serial'] !== $certSerial) {
-            throw new CertificateMismatchException('Certificate serial mismatch');
-        }
-        
-        $this->db->beginTransaction();
-        
-        try {
-            // Deactivate old device license
-            $this->deactivateLicense($migration['old_device_id']);
-            
-            // Get active subscription
-            $subscription = $this->getActiveSubscription($clientCertFingerprint);
-            
-            // Generate new license token for new device
-            $newToken = $this->tokenService->generateLicenseToken(
-                $clientCertFingerprint,
-                $certSerial,
-                $newDeviceId,
-                $subscription
-            );
-            
-            // Store new license
-            $this->storeLicense($clientCertFingerprint, $certSerial, $newDeviceId, $subscription);
-            
-            // Clean up migration record
-            $this->deleteMigrationRecord($migrationToken);
-            
-            $this->db->commit();
-            
-            return $newToken;
-            
-        } catch (Exception $e) {
-            $this->db->rollback();
-            throw $e;
-        }
-    }
-}
-```
-
-### 8.2 Server Configuration Examples
-
-**Apache/Nginx Configuration for Dual Authentication:**
-
-**TLS-Only Endpoints (Certificate Enrollment):**
+**Nginx Configuration Example:**
 ```nginx
-# Enrollment endpoint - TLS only, no client certificate required
-location /api/certificate/enroll {
-    ssl_verify_client off;
-    proxy_pass http://php-backend/enroll.php;
+# TLS-only endpoint for certificate enrollment
+server {
+    listen 443 ssl;
+    server_name license-server.com;
+    
+    ssl_certificate /etc/ssl/certs/server.crt;
+    ssl_certificate_key /etc/ssl/private/server.key;
+    
+    # No client certificate required
+    location /api/certificate/enroll {
+        ssl_verify_client off;
+        proxy_pass http://php-backend;
+    }
 }
 
-location /api/token/validate {
-    ssl_verify_client off;
-    proxy_pass http://php-backend/token-validate.php;
-}
-```
-
-**mTLS Endpoints (All License Operations):**
-```nginx
-# License operations - require client certificate
-location /api/license/ {
+# mTLS endpoint for license operations
+server {
+    listen 9443 ssl;
+    server_name license-server.com;
+    
+    ssl_certificate /etc/ssl/certs/server.crt;
+    ssl_certificate_key /etc/ssl/private/server.key;
+    
+    # Require and verify client certificate
     ssl_verify_client on;
-    ssl_client_certificate /path/to/ca-chain.pem;
+    ssl_client_certificate /etc/ca/ca-chain.crt;
     ssl_verify_depth 2;
     
-    # Pass client certificate info to backend
-    proxy_set_header SSL-Client-Cert $ssl_client_cert;
-    proxy_set_header SSL-Client-Fingerprint $ssl_client_fingerprint;
-    proxy_set_header SSL-Client-Verify $ssl_client_verify;
-    
-    proxy_pass http://php-backend/;
-}
-
-location /api/migration/ {
-    ssl_verify_client on;
-    ssl_client_certificate /path/to/ca-chain.pem;
-    ssl_verify_depth 2;
-    
-    proxy_set_header SSL-Client-Cert $ssl_client_cert;
-    proxy_set_header SSL-Client-Fingerprint $ssl_client_fingerprint;
-    
-    proxy_pass http://php-backend/;
-}
-```
-
-**PHP Endpoint Authentication Validation:**
-```php
-// For mTLS endpoints - validate client certificate presence
-function validateClientCertificate() {
-    $clientCert = $_SERVER['SSL_CLIENT_CERT'] ?? null;
-    $clientVerify = $_SERVER['SSL_CLIENT_VERIFY'] ?? null;
-    
-    if (!$clientCert || $clientVerify !== 'SUCCESS') {
-        throw new AuthenticationException('Valid client certificate required');
+    location /api/license/ {
+        # Pass certificate info to backend
+        proxy_set_header SSL-Client-Cert $ssl_client_cert;
+        proxy_set_header SSL-Client-Fingerprint $ssl_client_fingerprint;
+        proxy_set_header SSL-Client-Verify $ssl_client_verify;
+        proxy_pass http://php-backend;
     }
     
-    return openssl_x509_fingerprint($clientCert, 'sha256');
-}
-
-// For TLS-only endpoints - validate enrollment token
-function validateEnrollmentToken($token) {
-    if (empty($token)) {
-        throw new AuthenticationException('Enrollment token required');
+    location /api/migration/ {
+        proxy_set_header SSL-Client-Cert $ssl_client_cert;
+        proxy_set_header SSL-Client-Fingerprint $ssl_client_fingerprint;
+        proxy_pass http://php-backend;
     }
-    
-    return $this->tokenService->validateToken($token);
 }
 ```
 
 ### 8.3 Database Schema
 
-**Certificate and Enrollment Token Schema:**
-
+**Users and Subscriptions:**
 ```sql
--- Enrollment tokens for certificate provisioning
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    organization VARCHAR(255),
+    password_hash VARCHAR(255) NOT NULL,
+    status ENUM('active', 'suspended', 'deleted') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL,
+    INDEX idx_email (email),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE subscriptions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    subscription_type ENUM('monthly', 'annual') NOT NULL,
+    start_date DATETIME NOT NULL,
+    end_date DATETIME NOT NULL,
+    payment_status ENUM('active', 'pending', 'expired', 'cancelled') DEFAULT 'pending',
+    payment_provider VARCHAR(50),
+    payment_provider_id VARCHAR(255),
+    auto_renew BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_user_id (user_id),
+    INDEX idx_end_date (end_date),
+    INDEX idx_payment_status (payment_status),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**Enrollment Tokens:**
+```sql
 CREATE TABLE enrollment_tokens (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     token VARCHAR(255) UNIQUE NOT NULL,
     user_id INT NOT NULL,
     subscriber_email VARCHAR(255) NOT NULL,
@@ -1208,15 +957,16 @@ CREATE TABLE enrollment_tokens (
     INDEX idx_subscription_id (subscription_id),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
 
--- Certificates issued by Private CA
+**Certificates:**
+```sql
 CREATE TABLE issued_certificates (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     serial_number VARCHAR(255) UNIQUE NOT NULL,
     subject VARCHAR(500) NOT NULL,
     fingerprint VARCHAR(255) UNIQUE NOT NULL,
-    client_cert_fingerprint VARCHAR(255),
     user_id INT NOT NULL,
     issued_at DATETIME NOT NULL,
     expires_at DATETIME NOT NULL,
@@ -1229,11 +979,10 @@ CREATE TABLE issued_certificates (
     INDEX idx_user_id (user_id),
     INDEX idx_status_expires (status, expires_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Links certificates to clients
 CREATE TABLE clients (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     client_cert_fingerprint VARCHAR(255) UNIQUE NOT NULL,
     cert_serial_number VARCHAR(255) NOT NULL,
     user_id INT NOT NULL,
@@ -1252,33 +1001,13 @@ CREATE TABLE clients (
     FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-### 8.4 License and Subscription Schema
-
-**License token tracking and subscription management:**
-
+**Licenses:**
 ```sql
-CREATE TABLE subscriptions (
-    id INT PRIMARY KEY AUTO_INCREMENT,
-    client_cert_fingerprint VARCHAR(255) NOT NULL,
-    cert_serial_number VARCHAR(255) NOT NULL,
-    subscription_type ENUM('monthly', 'annual') NOT NULL,
-    start_date DATETIME NOT NULL,
-    end_date DATETIME NOT NULL,
-    payment_status ENUM('active', 'pending', 'expired', 'cancelled') DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_cert_fingerprint (client_cert_fingerprint),
-    INDEX idx_cert_serial (cert_serial_number),
-    INDEX idx_end_date (end_date),
-    FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number)
-);
-
--- License tokens issued per device
 CREATE TABLE licenses (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     subscription_id INT NOT NULL,
     client_cert_fingerprint VARCHAR(255) NOT NULL,
     cert_serial_number VARCHAR(255) NOT NULL,
@@ -1293,11 +1022,10 @@ CREATE TABLE licenses (
     INDEX idx_cert_device (client_cert_fingerprint, device_id),
     INDEX idx_cert_serial (cert_serial_number),
     INDEX idx_device_active (device_id, is_active)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- License migration tokens
 CREATE TABLE license_migrations (
-    id INT PRIMARY KEY AUTO_INCREMENT,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     migration_token VARCHAR(255) UNIQUE NOT NULL,
     client_cert_fingerprint VARCHAR(255) NOT NULL,
     cert_serial_number VARCHAR(255) NOT NULL,
@@ -1308,187 +1036,554 @@ CREATE TABLE license_migrations (
     INDEX idx_expires (expires_at),
     INDEX idx_cert_serial (cert_serial_number),
     FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Key Database Design Points:**
-- `cert_serial_number` columns link license data to certificates
-- Certificate revocation cascades to all license tables
-- License tokens are cryptographically bound to certificate fingerprints
-- Migration tokens validate certificate ownership before device transfer
+### 8.4 Key Database Design Points
+
+- **Certificate-License Binding**: `cert_serial_number` columns link license data to certificates
+- **Cascade Deletion**: Certificate revocation cascades to all license tables
+- **Device Binding**: License tokens cryptographically bound to certificate fingerprints
+- **Migration Tracking**: Separate table tracks device transfers with audit trail
+- **Subscription Status**: Payment status tracked independently from license validity
 
 ## 9. Client Implementation
 
-### 9.1 Platform-Specific Components
+### 9.1 Client Architecture
 
-**Certificate and License Storage:**
-- Client certificates stored using platform keystore
-- License tokens encrypted and stored separately using device-specific keys
-- Both certificate and license validated on each application start
+**Component Responsibilities:**
 
-**Dual-Layer Validation:**
+**CertificateManager:**
+- Generate RSA key pairs
+- Create Certificate Signing Requests (CSR)
+- Store certificates in platform keystore
+- Retrieve certificates and private keys
+- Calculate certificate fingerprints
+
+**DeviceIdentifier:**
+- Detect current platform (Windows/macOS/Linux)
+- Retrieve platform-specific hardware identifiers
+- Generate stable, hashed device IDs
+- Handle fallback identification strategies
+
+**JWTValidator:**
+- Parse JWT tokens
+- Verify RSA signatures using embedded server public key
+- Validate token claims (expiration, issuer, etc.)
+- Check certificate-license binding
+
+**LicenseStorage:**
+- Encrypt license tokens with device-specific keys
+- Store encrypted tokens securely
+- Decrypt tokens for validation
+- Platform-specific secure storage integration
+
+**LicenseApiClient:**
+- Configure HTTP client with mTLS
+- Submit enrollment requests (TLS)
+- Request license renewals (mTLS)
+- Handle migration operations (mTLS)
+
+**EnrollmentManager:**
+- Coordinate enrollment workflow
+- Generate key pairs and CSRs
+- Submit enrollment requests
+- Install certificates and initial license tokens
+
+**LicenseManager:**
+- Validate licenses offline
+- Check subscription status and grace periods
+- Trigger renewal attempts
+- Manage license lifecycle
+
+### 9.2 Multi-Platform Device Identification Implementation
+
+**Platform Detection and Strategy Selection:**
+
 ```java
-public class ClientAuthenticationManager {
-    private CertificateManager certificateManager;
-    private LicenseManager licenseManager;
+public interface IDeviceIdentifier {
+    /**
+     * Generate stable device identifier for current platform
+     * @return String Device ID in format "device_{sha256_hash}"
+     * @throws DeviceIdException if identifier cannot be determined
+     */
+    String generateDeviceId() throws DeviceIdException;
     
-    public AuthenticationResult authenticate() {
-        try {
-            // Layer 1: Validate certificate
-            X509Certificate clientCert = certificateManager.getClientCertificate();
-            if (clientCert == null) {
-                return AuthenticationResult.needsCertificateEnrollment();
-            }
-            
-            if (certificateManager.isCertificateExpired(clientCert)) {
-                return AuthenticationResult.certificateExpired();
-            }
-            
-            // Layer 2: Validate license token
-            LicenseStatus licenseStatus = licenseManager.validateLicense();
-            
-            switch (licenseStatus) {
-                case VALID:
-                    return AuthenticationResult.authenticated();
-                    
-                case GRACE_PERIOD:
-                    return AuthenticationResult.inGracePeriod();
-                    
-                case EXPIRED:
-                    return AuthenticationResult.subscriptionExpired();
-                    
-                default:
-                    return AuthenticationResult.needsLicenseActivation();
-            }
-            
-        } catch (Exception e) {
-            return AuthenticationResult.authenticationFailed(e);
+    /**
+     * Get raw platform identifier (for debugging)
+     * @return String Platform-specific identifier before hashing
+     */
+    String getRawPlatformIdentifier();
+}
+
+public class DeviceIdentifierFactory {
+    public static IDeviceIdentifier create() {
+        String os = System.getProperty("os.name").toLowerCase();
+        
+        if (os.contains("win")) {
+            return new WindowsDeviceIdentifier();
+        } else if (os.contains("mac")) {
+            return new MacOSDeviceIdentifier();
+        } else if (os.contains("nix") || os.contains("nux")) {
+            return new LinuxDeviceIdentifier();
+        } else {
+            throw new UnsupportedOperationException("Platform not supported: " + os);
         }
     }
 }
 ```
 
-**License Validation (Offline-capable):**
+**Windows Implementation Strategy:**
+
 ```java
-public class OfflineLicenseManager {
-    private CertificateManager certificateManager;
+public class WindowsDeviceIdentifier implements IDeviceIdentifier {
     
-    public LicenseStatus validateLicense() {
+    @Override
+    public String generateDeviceId() throws DeviceIdException {
+        String rawId = getRawPlatformIdentifier();
+        return "device_" + sha256(rawId);
+    }
+    
+    @Override
+    public String getRawPlatformIdentifier() {
+        // Primary: Windows MachineGuid from registry
         try {
-            String encryptedToken = getStoredToken();
-            if (encryptedToken == null) return LicenseStatus.NOT_ACTIVATED;
-            
-            // Decrypt with device-specific key
-            String jwt = decryptWithHardwareKey(encryptedToken);
-            
-            // Parse and validate JWT
-            Claims claims = parseJWT(jwt);
-            
-            // Verify token is bound to our certificate
-            X509Certificate ourCert = certificateManager.getClientCertificate();
-            String ourFingerprint = calculateFingerprint(ourCert);
-            String tokenFingerprint = claims.get("sub", String.class);
-            
-            if (!ourFingerprint.equals(tokenFingerprint)) {
-                throw new CertificateMismatchException("License bound to different certificate");
+            String machineGuid = getWindowsMachineGuid();
+            if (machineGuid != null && !machineGuid.isEmpty()) {
+                return machineGuid;
             }
+        } catch (Exception e) {
+            // Log and try fallback
+        }
+        
+        // Fallback: Motherboard serial + CPU ID
+        try {
+            String motherboardSerial = getMotherboardSerial();
+            String cpuId = getCpuId();
             
-            // Verify certificate serial matches
-            String ourSerial = ourCert.getSerialNumber().toString(16);
-            String tokenSerial = claims.get("cert_serial", String.class);
-            
-            if (!ourSerial.equals(tokenSerial)) {
-                throw new CertificateMismatchException("Certificate serial mismatch");
+            if (motherboardSerial != null && cpuId != null) {
+                return motherboardSerial + "-" + cpuId;
             }
-            
-            // Check subscription dates
-            Date subscriptionEnd = claims.get("subscription_end", Date.class);
-            Date gracePeriodEnd = claims.get("grace_period_end", Date.class);
-            Date now = new Date();
-            
-            if (now.before(subscriptionEnd)) {
-                return LicenseStatus.VALID;
+        } catch (Exception e) {
+            throw new DeviceIdException("Unable to determine device ID", e);
+        }
+        
+        throw new DeviceIdException("No device identifier available");
+    }
+    
+    /**
+     * Read MachineGuid from Windows Registry
+     * Registry path: HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography\MachineGuid
+     * 
+     * Implementation approaches:
+     * 1. Use JNA (Java Native Access) with advapi32.dll
+     * 2. Execute: reg query "HKLM\SOFTWARE\Microsoft\Cryptography" /v MachineGuid
+     * 3. Use Windows Registry API via JNI
+     */
+    private String getWindowsMachineGuid() throws IOException {
+        // Example using command execution:
+        ProcessBuilder pb = new ProcessBuilder(
+            "reg", "query",
+            "HKLM\\SOFTWARE\\Microsoft\\Cryptography",
+            "/v", "MachineGuid"
+        );
+        
+        Process process = pb.start();
+        // Parse output to extract GUID value
+        // Format: "MachineGuid    REG_SZ    {GUID}"
+        
+        // Return extracted GUID
+        return extractGuidFromRegistryOutput(process.getInputStream());
+    }
+    
+    /**
+     * Get motherboard serial using WMI
+     * WMI Query: SELECT SerialNumber FROM Win32_BaseBoard
+     */
+    private String getMotherboardSerial() {
+        // Implementation using WMI via command or JNA
+        return executeWmiQuery("SELECT SerialNumber FROM Win32_BaseBoard");
+    }
+    
+    /**
+     * Get CPU ID using WMI
+     * WMI Query: SELECT ProcessorId FROM Win32_Processor
+     */
+    private String getCpuId() {
+        // Implementation using WMI via command or JNA
+        return executeWmiQuery("SELECT ProcessorId FROM Win32_Processor");
+    }
+}
+```
+
+**macOS Implementation Strategy:**
+
+```java
+public class MacOSDeviceIdentifier implements IDeviceIdentifier {
+    
+    @Override
+    public String generateDeviceId() throws DeviceIdException {
+        String rawId = getRawPlatformIdentifier();
+        return "device_" + sha256(rawId);
+    }
+    
+    @Override
+    public String getRawPlatformIdentifier() {
+        // Primary: Hardware UUID
+        try {
+            String hardwareUuid = getMacOSHardwareUUID();
+            if (hardwareUuid != null && !hardwareUuid.isEmpty()) {
+                return hardwareUuid;
             }
+        } catch (Exception e) {
+            // Log and try fallback
+        }
+        
+        // Fallback: System serial number
+        try {
+            String serialNumber = getMacOSSerialNumber();
+            if (serialNumber != null && !serialNumber.isEmpty()) {
+                return serialNumber;
+            }
+        } catch (Exception e) {
+            throw new DeviceIdException("Unable to determine device ID", e);
+        }
+        
+        throw new DeviceIdException("No device identifier available");
+    }
+    
+    /**
+     * Get Hardware UUID using system_profiler
+     * Command: system_profiler SPHardwareDataType | grep 'Hardware UUID'
+     * Output format: "Hardware UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+     */
+    private String getMacOSHardwareUUID() throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder(
+            "/usr/sbin/system_profiler", "SPHardwareDataType"
+        );
+        
+        Process process = pb.start();
+        
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream()))) {
             
-            if (now.before(gracePeriodEnd)) {
-                if (shouldAttemptRenewal()) {
-                    return attemptLicenseRefresh();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("Hardware UUID:")) {
+                    // Extract UUID after colon
+                    String uuid = line.split(":")[1].trim();
+                    return uuid;
                 }
-                return LicenseStatus.GRACE_PERIOD;
             }
-            
-            return LicenseStatus.EXPIRED;
-            
-        } catch (Exception e) {
-            return LicenseStatus.INVALID;
         }
+        
+        process.waitFor();
+        return null;
     }
-}
-```
-
-**License Renewal Over mTLS:**
-```java
-public class LicenseRenewalClient {
-    private CertificateManager certificateManager;
-    private SSLContextBuilder sslContextBuilder;
     
-    public TokenRefreshResponse attemptRenewal() {
-        try {
-            // Build mTLS context using our certificate
-            SSLContext sslContext = sslContextBuilder
-                .withClientCertificate(certificateManager.getClientCertificate())
-                .withClientPrivateKey(certificateManager.getPrivateKey())
-                .withTrustedCAs(certificateManager.getCATrustStore())
-                .build();
+    /**
+     * Get system serial number using ioreg
+     * Command: ioreg -l | grep IOPlatformSerialNumber
+     * Output format: "IOPlatformSerialNumber" = "XXXXXXXXXXXX"
+     */
+    private String getMacOSSerialNumber() throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("/usr/sbin/ioreg", "-l");
+        
+        Process process = pb.start();
+        
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream()))) {
             
-            HttpClient client = HttpClient.newBuilder()
-                .sslContext(sslContext)
-                .build();
-            
-            String deviceId = deviceIdentifier.generateDeviceId();
-            String requestBody = new JSONObject()
-                .put("device_id", deviceId)
-                .toString();
-            
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getLicenseServerUrl() + "/api/license/renew"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .build();
-            
-            HttpResponse<String> response = client.send(request, 
-                HttpResponse.BodyHandlers.ofString());
-            
-            if (response.statusCode() == 200) {
-                JSONObject json = new JSONObject(response.body());
-                
-                if (json.has("token")) {
-                    String newToken = json.getString("token");
-                    storeEncryptedToken(newToken);
-                    return TokenRefreshResponse.success(newToken);
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("IOPlatformSerialNumber")) {
+                    // Extract serial between quotes
+                    String[] parts = line.split("=");
+                    if (parts.length > 1) {
+                        return parts[1].trim().replaceAll("\"", "");
+                    }
                 }
             }
-            
-            return TokenRefreshResponse.failed(response.body());
-            
-        } catch (Exception e) {
-            return TokenRefreshResponse.networkError(e);
         }
+        
+        process.waitFor();
+        return null;
     }
 }
 ```
 
-### 9.2 User Interface Components
+**Linux Implementation Strategy:**
 
-**License Status Display:**
-- Current subscription status
-- Days remaining in subscription/grace period
-- Clear renewal instructions
+```java
+public class LinuxDeviceIdentifier implements IDeviceIdentifier {
+    
+    @Override
+    public String generateDeviceId() throws DeviceIdException {
+        String rawId = getRawPlatformIdentifier();
+        return "device_" + sha256(rawId);
+    }
+    
+    @Override
+    public String getRawPlatformIdentifier() {
+        // Primary: machine-id
+        try {
+            String machineId = getLinuxMachineId();
+            if (machineId != null && !machineId.isEmpty()) {
+                return machineId;
+            }
+        } catch (Exception e) {
+            // Log and try fallback
+        }
+        
+        // Fallback: DMI product UUID
+        try {
+            String productUuid = getDmiProductUuid();
+            if (productUuid != null && !productUuid.isEmpty()) {
+                return productUuid;
+            }
+        } catch (Exception e) {
+            throw new DeviceIdException("Unable to determine device ID", e);
+        }
+        
+        throw new DeviceIdException("No device identifier available");
+    }
+    
+    /**
+     * Read machine-id from standard locations
+     * Paths: /etc/machine-id or /var/lib/dbus/machine-id
+     * 
+     * This is the systemd machine ID, a 128-bit ID stored as 32 hex chars
+     */
+    private String getLinuxMachineId() throws IOException {
+        // Try primary location
+        Path primaryPath = Paths.get("/etc/machine-id");
+        if (Files.exists(primaryPath)) {
+            String machineId = Files.readString(primaryPath).trim();
+            if (!machineId.isEmpty()) {
+                return machineId;
+            }
+        }
+        
+        // Try fallback location
+        Path fallbackPath = Paths.get("/var/lib/dbus/machine-id");
+        if (Files.exists(fallbackPath)) {
+            String machineId = Files.readString(fallbackPath).trim();
+            if (!machineId.isEmpty()) {
+                return machineId;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Read DMI product UUID from sysfs
+     * Path: /sys/class/dmi/id/product_uuid
+     * 
+     * Note: May require root permissions on some distributions
+     * Alternative: Use dmidecode command (also requires root)
+     */
+    private String getDmiProductUuid() throws IOException {
+        Path uuidPath = Paths.get("/sys/class/dmi/id/product_uuid");
+        
+        if (Files.exists(uuidPath) && Files.isReadable(uuidPath)) {
+            String uuid = Files.readString(uuidPath).trim();
+            if (!uuid.isEmpty() && !uuid.equals("00000000-0000-0000-0000-000000000000")) {
+                return uuid;
+            }
+        }
+        
+        // Alternative: Try dmidecode command
+        // Requires: sudo dmidecode -s system-uuid
+        // Or reading /proc/sys/kernel/random/boot_id as last resort
+        
+        return null;
+    }
+}
+```
 
-**Migration Dialogs:**
-- Export: Generate and display migration code
-- Import: Code entry with validation
-- File transfer options for offline scenarios
+**Common Hashing Utility:**
+
+```java
+/**
+ * SHA-256 hash implementation used by all platform identifiers
+ */
+private String sha256(String input) throws DeviceIdException {
+    try {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+        
+        // Convert to hex string
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : hash) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        
+        return hexString.toString();
+        
+    } catch (NoSuchAlgorithmException e) {
+        throw new DeviceIdException("SHA-256 algorithm not available", e);
+    }
+}
+```
+
+**Platform Integration Notes:**
+
+**Windows:**
+- Registry access requires no special permissions for MachineGuid
+- WMI queries can be executed via command line or JNA
+- Consider caching results to avoid repeated system calls
+
+**macOS:**
+- `system_profiler` and `ioreg` commands available on all macOS versions
+- No special permissions required
+- Hardware UUID is most stable across OS reinstalls
+
+**Linux:**
+- `/etc/machine-id` is standard on systemd-based distributions
+- `/sys/class/dmi/id/product_uuid` may require root on some distros
+- Consider distribution-specific variations
+
+**Reference Implementation:**
+Complete working implementation for macOS with JDK 21+ features available in `ReferenceImplGuide.md`.
+
+### 9.3 Certificate Management
+
+**Certificate Storage Interface:**
+```java
+public interface ICertificateManager {
+    /**
+     * Generate RSA key pair for certificate enrollment
+     * @return KeyPair with 2048-bit RSA keys
+     */
+    KeyPair generateKeyPair() throws CertificateException;
+    
+    /**
+     * Create Certificate Signing Request
+     * @param keyPair Generated key pair
+     * @param commonName Subject common name
+     * @param organization Subject organization
+     * @return String CSR in PEM or JSON format
+     */
+    String generateCSR(KeyPair keyPair, String commonName, String organization) 
+        throws CertificateException;
+    
+    /**
+     * Store certificate and private key in platform keystore
+     * @param cert X.509 certificate
+     * @param privateKey Private key
+     * @param label Friendly name for certificate
+     */
+    void storeCertificateInKeystore(X509Certificate cert, PrivateKey privateKey, String label)
+        throws CertificateException;
+    
+    /**
+     * Retrieve certificate from platform keystore
+     * @param label Certificate label
+     * @return X509Certificate or null if not found
+     */
+    X509Certificate getCertificateFromKeystore(String label) throws CertificateException;
+    
+    /**
+     * Get private key from platform keystore
+     * @param label Certificate label
+     * @return PrivateKey or null if not found
+     */
+    PrivateKey getPrivateKeyFromKeystore(String label) throws CertificateException;
+    
+    /**
+     * Calculate SHA-256 fingerprint of certificate
+     * @param cert X.509 certificate
+     * @return String Hex-encoded SHA-256 hash
+     */
+    String getCertificateFingerprint(X509Certificate cert) throws CertificateException;
+}
+```
+
+### 9.4 License Validation Interface
+
+**Offline License Validation:**
+```java
+public interface ILicenseManager {
+    /**
+     * Validate license token offline
+     * @return LicenseStatus indicating current state
+     */
+    LicenseStatus validateLicense();
+    
+    /**
+     * Attempt to renew license (requires network)
+     * @param serverUrl License server URL
+     * @return boolean True if renewal successful
+     */
+    boolean attemptRenewal(String serverUrl);
+    
+    /**
+     * Get days remaining in subscription
+     * @return int Days until expiration (negative if expired)
+     */
+    int getDaysRemaining();
+    
+    /**
+     * Check if currently in grace period
+     * @return boolean True if in grace period
+     */
+    boolean isInGracePeriod();
+}
+
+/**
+ * License validation status
+ */
+public enum LicenseStatus {
+    VALID,              // Active subscription
+    GRACE_PERIOD,       // Expired but in grace period
+    EXPIRED,            // Beyond grace period
+    NOT_ACTIVATED,      // No license token found
+    INVALID             // Token validation failed
+}
+```
+
+### 9.5 Client Configuration
+
+**Embedded Resources:**
+```java
+public class AppConfig {
+    // License server URL
+    public static final String LICENSE_SERVER_URL = 
+        "https://license-server.com:8443";
+    
+    // Embedded CA certificate chain (PEM format)
+    // Used to validate server certificate
+    public static final String CA_CERTIFICATE_CHAIN = """
+        -----BEGIN CERTIFICATE-----
+        [Root CA Certificate]
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        [Intermediate CA Certificate]
+        -----END CERTIFICATE-----
+        """;
+    
+    // Embedded license server public key (PEM format)
+    // Used to validate JWT signatures
+    public static final String LICENSE_SERVER_PUBLIC_KEY = """
+        -----BEGIN PUBLIC KEY-----
+        [RSA Public Key]
+        -----END PUBLIC KEY-----
+        """;
+    
+    // Renewal settings
+    public static final int RENEWAL_CHECK_DAYS_BEFORE_EXPIRY = 7;
+    public static final int RENEWAL_CHECK_INTERVAL_HOURS = 24;
+    
+    // Certificate settings
+    public static final String CERTIFICATE_LABEL = "License Client Certificate";
+    public static final int CERTIFICATE_KEY_SIZE = 2048;
+}
+```
 
 ## 10. Security Considerations
 
@@ -1497,7 +1592,7 @@ public class LicenseRenewalClient {
 **Certificate Layer:**
 - Hierarchical Private CA with offline Root CA
 - 2-year certificate validity with renewal process
-- Certificate revocation on account deletion
+- Certificate revocation on account deletion only
 - mTLS provides cryptographic authentication
 
 **License Layer:**
@@ -1565,17 +1660,47 @@ public class LicenseRenewalClient {
 - Server validates certificate on every license operation
 - Offline validation checks certificate-license binding
 
+**Man-in-the-Middle Attacks:**
+- mTLS provides mutual authentication
+- Server certificate validated by embedded CA chain
+- Client certificate validated by Private CA chain
+- Cannot intercept without compromising both certificates
+
+### 10.4 Key Management Security
+
+**Separation of Keys:**
+```
+Private CA Keys (Certificate Issuance):
+- Root CA Key: 4096-bit RSA, offline, 20-year validity
+- Intermediate CA Key: 4096-bit RSA, online, 10-year validity
+
+License Server Keys (JWT Signing):
+- License Signing Key: 2048-bit RSA, online, annual rotation
+- Separate from CA infrastructure
+```
+
+**Key Rotation:**
+- License signing keys rotated annually
+- Both old and new public keys embedded in client during transition
+- 90-day overlap period for smooth transition
+- Old key decommissioned after 180 days
+
+**Compromise Impact:**
+- Compromised license key: Cannot issue certificates, only fake licenses (requires valid cert)
+- Compromised Intermediate CA: Can issue rogue certificates (Root CA remains secure)
+- Compromised Root CA: Complete PKI compromise (kept offline to minimize risk)
+
 ## 11. Operational Considerations
 
-### 11.1 Deployment
+### 11.1 Deployment Requirements
 
 **Server Requirements:**
-- PHP 7.4+ with OpenSSL support
-- MySQL/PostgreSQL database
-- Web server (Apache/Nginx) with dual TLS configuration:
+- PHP 8.1+ with OpenSSL extension
+- MySQL 8.0+ or PostgreSQL 12+
+- Web server (Apache 2.4+ or Nginx 1.18+) with dual TLS configuration:
   - TLS-only endpoints for certificate enrollment
   - mTLS endpoints for all license operations
-- **Two separate key pairs:**
+- Two separate key pairs:
   - Private CA keys for certificate issuance
   - License server keys for JWT signing
 - Private CA infrastructure:
@@ -1583,37 +1708,29 @@ public class LicenseRenewalClient {
   - Intermediate CA (online, 10-year validity)
   - Certificate storage and management
 
-**Key Management:**
-```
-/etc/ca/
-├── root-ca/
-│   ├── root-ca.crt
-│   └── root-ca.key               # Offline, encrypted
-├── intermediate-ca/
-│   ├── intermediate-ca.crt
-│   └── intermediate-ca.key       # Online, encrypted
-└── issued-certificates/
+**Client Requirements:**
+- Java 17+ (LTS) or Java 21+ (recommended)
+- Platform-specific secure storage:
+  - Windows: Certificate Store access
+  - macOS: Keychain Services access
+  - Linux: File system with encryption capabilities
+- Network connectivity for:
+  - Initial enrollment
+  - Periodic license renewal
+  - Certificate renewal
+  - License migration
 
-/etc/license-server/
-├── license-signing.key           # For JWT signing
-└── license-signing.pub           # Embedded in client
-```
-
-**Important:** License server keys are completely separate from CA keys. Compromising license server keys does NOT compromise the certificate infrastructure.
-
-**Client Distribution:**
-- Embedded CA certificate chain
-- Embedded license server public key for JWT validation
-- Platform-specific installation packages
-- Certificate enrollment process integration
-- mTLS client implementation for license operations
+**Deployment Options:**
+- Traditional server deployment (PHP + MySQL + Apache/Nginx)
+- Containerized deployment (Docker, Kubernetes)
+- Cloud-native deployment (AWS, Azure, GCP)
 
 ### 11.2 Monitoring and Analytics
 
 **Certificate Layer Monitoring:**
-- CA health checks and certificate expiration
+- CA health checks and certificate expiration tracking
 - Certificate issuance rates and patterns
-- CRL generation and distribution
+- CRL generation and distribution metrics
 - Certificate renewal rates
 
 **License Layer Monitoring:**
@@ -1623,47 +1740,139 @@ public class LicenseRenewalClient {
 - Subscription renewal success rates
 
 **Combined Monitoring:**
-- Track relationship between certificate renewals and license status
-- Monitor certificate-license mismatches (potential security issues)
-- Analyze subscription churn relative to certificate lifecycle
+- Certificate-license relationship health
+- Certificate renewals vs license status
+- Subscription churn relative to certificate lifecycle
 - Grace period conversion rates
 
 **Performance Metrics:**
-- mTLS handshake success rates
-- Token refresh success rates (certificate + license)
+- mTLS handshake success rates and latency
+- Token refresh success rates
 - Migration completion rates
-- Grace period utilization
 - Certificate validation latency
 - License validation latency
+
+### 11.3 Backup and Disaster Recovery
+
+**Critical Assets:**
+
+**Root CA Private Key:**
+- Most critical asset
+- Stored offline on encrypted media
+- Multiple encrypted backups in secure locations
+- Access requires multi-person authorization
+- Never connected to network
+
+**Intermediate CA Private Key:**
+- Online but heavily protected
+- Encrypted at rest with strong passphrase
+- Regular encrypted backups to secure storage
+- HSM storage recommended for production
+
+**License Signing Private Key:**
+- Online for JWT signing operations
+- Encrypted at rest
+- Annual rotation reduces compromise window
+- Backup before rotation
+
+**Database:**
+- Regular automated backups (daily minimum)
+- Include all tables: users, subscriptions, certificates, licenses
+- Test restoration procedures regularly
+- Retention: 90 days minimum
+
+**Recovery Procedures:**
+
+**Intermediate CA Key Compromise:**
+1. Revoke compromised Intermediate CA certificate
+2. Generate new Intermediate CA key pair
+3. Issue new Intermediate CA certificate from Root CA
+4. Update server configuration
+5. Reissue all active client certificates
+6. Notify all clients to re-enroll
+
+**License Signing Key Compromise:**
+1. Generate new license signing key pair
+2. Embed both old and new public keys in emergency client update
+3. Deploy client update immediately
+4. Switch to new key for signing
+5. Revoke all existing license tokens (force renewal)
+6. Decommission old key after transition
+
+**Database Loss:**
+1. Restore from most recent backup
+2. Identify certificates issued since backup
+3. Manual reconciliation with certificate logs
+4. Force license renewal for affected users
+
+### 11.4 Certificate Lifecycle Management
+
+**Certificate Expiration Monitoring:**
+- Automated checks for certificates expiring within 60 days
+- Email notifications to users at 60, 30, and 7 days before expiry
+- Grace period: 7 days post-expiry before blocking access
+- Automated renewal process for clients online during renewal window
+
+**Certificate Renewal Workflow:**
+1. Client detects certificate expiring within 30 days
+2. Generate new key pair and CSR
+3. Submit renewal request via mTLS (authenticated with old cert)
+4. Server validates old certificate and issues new certificate
+5. Client installs new certificate alongside old
+6. Client updates license server mapping
+7. Client removes old certificate after successful verification
+
+**CRL Distribution:**
+- Update CRL every 24 hours
+- Publish to web-accessible endpoint: `https://license-server.com/crl/current.crl`
+- Include in certificate AIA extension
+- Cache-Control headers: max-age=86400 (24 hours)
 
 ## 12. Future Enhancements
 
 ### 12.1 Potential Improvements
 
 **Enhanced Security:**
-- Hardware attestation (TPM, Secure Enclave) for device binding
-- Code signing and integrity verification
+- Hardware attestation (TPM 2.0, Secure Enclave) for device binding
+- Code signing and integrity verification for client applications
 - Remote license revocation capabilities (beyond account deletion)
-- Certificate pinning for additional security
+- Certificate pinning for additional MITM protection
+- OCSP stapling for real-time certificate validation
 
 **User Experience:**
-- Cloud-based license synchronization across devices
+- Cloud-based license synchronization across multiple devices
 - Family/team license sharing with sub-certificates
-- Automatic device detection and setup
-- Streamlined certificate renewal process
+- Automatic device detection and setup wizard
+- Streamlined certificate renewal (silent background renewal)
+- Mobile device support (iOS, Android)
 
 **Business Features:**
 - Usage-based billing integration
 - Feature-specific entitlements and metering
-- Temporary license extensions and trials
-- Multi-tier subscription management
-- Certificate-based SSO integration
+- Temporary license extensions and trial periods
+- Multi-tier subscription management (Basic, Pro, Enterprise)
+- Certificate-based SSO integration with corporate identity providers
+
+**Platform Expansion:**
+- Windows platform client implementation
+- Linux platform client implementation
+- Web-based license management dashboard
+- API for third-party integrations
+- Webhook notifications for license events
 
 **Integration Enhancements:**
 - Certificate rotation automation
 - Automated CA intermediate certificate updates
 - License token refresh during certificate renewal
 - Unified certificate-license renewal flow
+- Integration with payment providers (Stripe, PayPal)
+
+**Operational Improvements:**
+- HSM integration for CA key storage
+- Multi-region license server deployment
+- Load balancing and failover
+- Advanced analytics and reporting
+- Compliance reporting (SOC 2, ISO 27001)
 
 ---
 
@@ -1684,38 +1893,38 @@ public class LicenseRenewalClient {
 
 ### Certificate Management (TLS Only - Token Auth)
 - `POST /api/certificate/enroll` - Certificate enrollment with token + CSR
-  - **Input:** enrollment_token, csr_pem, device_id
-  - **Output:** certificate, ca_chain, license_token
+  - **Request:** `{enrollment_token, csr, device_id}`
+  - **Response:** `{certificate, ca_chain, license_token, subscription_info}`
 - `GET /api/certificate/status` - Check certificate validity
 - `GET /api/crl/current` - Download current CRL
 
 ### License Management (mTLS Required - Certificate Auth)
 - `POST /api/license/activate` - Initial license activation
-  - **Auth:** Client certificate
-  - **Input:** device_id
-  - **Output:** license_token
+  - **Auth:** Client certificate via mTLS
+  - **Request:** `{device_id}`
+  - **Response:** `{license_token, subscription_info}`
 - `POST /api/license/renew` - Check for subscription renewal
-  - **Auth:** Client certificate
-  - **Input:** device_id
-  - **Output:** license_token or grace_period status
+  - **Auth:** Client certificate via mTLS
+  - **Request:** `{device_id}`
+  - **Response:** `{status, token?, subscription_end?, grace_period_end?, message}`
 - `GET /api/license/status` - Current license status
-  - **Auth:** Client certificate
-  - **Output:** subscription details, expiration, grace period
+  - **Auth:** Client certificate via mTLS
+  - **Response:** `{status, subscription_type, subscription_end, grace_period_end, payment_status}`
 
 ### Migration (mTLS Required - Certificate Auth)
 - `POST /api/license/migrate/initiate` - Start license migration
-  - **Auth:** Client certificate
-  - **Input:** current_device_id
-  - **Output:** migration_token (24h validity)
+  - **Auth:** Client certificate via mTLS
+  - **Request:** `{current_device_id}`
+  - **Response:** `{migration_token, expires_at, message}`
 - `POST /api/license/migrate/complete` - Complete migration
-  - **Auth:** Client certificate
-  - **Input:** migration_token, new_device_id
-  - **Output:** new license_token
+  - **Auth:** Client certificate via mTLS
+  - **Request:** `{migration_token, new_device_id}`
+  - **Response:** `{license_token, subscription_info}`
 
 ### Subscription Management (mTLS Required - Certificate Auth)
 - `GET /api/subscription/status` - Current subscription details
-  - **Auth:** Client certificate
-  - **Output:** subscription type, dates, payment status
+  - **Auth:** Client certificate via mTLS
+  - **Response:** `{subscription_type, start_date, end_date, payment_status, auto_renew}`
 
 ## Appendix B: Error Codes
 
@@ -1748,7 +1957,98 @@ public class LicenseRenewalClient {
 | 3002 | License valid but certificate expired | Renew certificate first |
 | 3003 | Certificate-license binding broken | Re-activate license |
 
-## Appendix C: Complete Workflow Examples
+## Appendix C: Configuration Reference
+
+### Server Environment Variables
+
+```ini
+# Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://license-server.com
+APP_PORT=8443
+
+# Database
+DB_CONNECTION=mysql
+DB_HOST=localhost
+DB_PORT=3306
+DB_DATABASE=license_system
+DB_USERNAME=license_user
+DB_PASSWORD=secure_password_here
+
+# Private CA Configuration
+CA_ROOT_CERT_PATH=/etc/ca/root-ca/root-ca.crt
+CA_ROOT_KEY_PATH=/etc/ca/root-ca/root-ca.key
+CA_ROOT_KEY_PASSWORD=root_ca_password_here
+
+CA_INTERMEDIATE_CERT_PATH=/etc/ca/intermediate-ca/intermediate-ca.crt
+CA_INTERMEDIATE_KEY_PATH=/etc/ca/intermediate-ca/intermediate-ca.key
+CA_INTERMEDIATE_KEY_PASSWORD=intermediate_ca_password_here
+
+CA_ISSUED_CERTS_DIR=/etc/ca/issued-certificates
+CA_CRL_PATH=/var/www/html/public/crl/current.crl
+
+# License Signing Keys (separate from CA keys)
+LICENSE_SIGNING_KEY_PATH=/etc/license-server/license-signing.key
+LICENSE_SIGNING_KEY_PASSWORD=license_key_password_here
+LICENSE_SIGNING_PUB_PATH=/etc/license-server/license-signing.pub
+
+# TLS Configuration
+TLS_CERT_PATH=/etc/ssl/certs/server.crt
+TLS_KEY_PATH=/etc/ssl/private/server.key
+
+# Security
+JWT_SECRET=random_secret_key_here
+ENCRYPTION_KEY=32_byte_encryption_key_here
+
+# Grace Periods (days)
+GRACE_PERIOD_MONTHLY=5
+GRACE_PERIOD_ANNUAL=14
+
+# Certificate Validity
+CERTIFICATE_VALIDITY_YEARS=2
+CERTIFICATE_RENEWAL_DAYS=30
+
+# Rate Limiting
+RATE_LIMIT_ENROLLMENT=10
+RATE_LIMIT_LICENSE=100
+RATE_LIMIT_WINDOW=3600
+
+# Logging
+LOG_LEVEL=info
+LOG_PATH=/var/log/license-server/app.log
+AUDIT_LOG_PATH=/var/log/license-server/audit.log
+```
+
+### Client Configuration
+
+```properties
+# License Server
+license.server.url=https://license-server.com:8443
+license.server.verify.ssl=true
+
+# Certificate Storage
+cert.keychain.name=login
+cert.keychain.label=License Client Certificate
+
+# License Storage
+license.storage.path=${user.home}/.config/license-client
+license.storage.encrypted=true
+
+# Renewal
+license.renewal.check.days=7
+license.renewal.check.interval.hours=24
+license.renewal.background=true
+
+# Migration
+migration.token.validity.hours=24
+
+# Logging
+log.level=INFO
+log.path=${user.home}/.local/share/license-client/logs
+```
+
+## Appendix D: Complete Workflow Examples
 
 ### New User Onboarding
 
@@ -1756,213 +2056,162 @@ public class LicenseRenewalClient {
 ```
 User → Portal: Sign up, purchase subscription
 Portal → Database: Create user record, subscription record
-Portal → User: Account confirmation
+Portal → User: Account confirmation email
 ```
 
 **Step 2: Certificate Enrollment**
 ```
 User → Portal: Login, navigate to enrollment page
 Portal → Database: Generate enrollment_token
-Portal → User: Display token + download links
+Portal → User: Display token + download instructions
 
 User → Client App: Install app, enter token
-Client → Client: Generate RSA key pair, create CSR
+Client → Client: Generate RSA key pair (2048-bit)
+Client → Client: Create CSR
 Client → Server (TLS): POST /api/certificate/enroll {token, csr, device_id}
-Server → Private CA: Issue certificate
+Server → Private CA: Issue certificate (2-year validity)
 Server → Database: Store certificate, mark token used
-```
-
-**Step 3: License Issuance (Automatic)**
-```
-Server → Database: Lookup subscription for user
-Server → License Service: Generate JWT license token
-    {cert_fingerprint, cert_serial, device_id, subscription_info}
-Server → Client (TLS): Return certificate + CA chain + license_token
+Server → License Service: Generate initial JWT license token
+Server → Client (TLS): Return {certificate, ca_chain, license_token}
 Client → Platform Keystore: Store certificate + private key
-Client → Device Storage: Encrypt and store license_token
+Client → Encrypted Storage: Store license token
 ```
 
-**Step 4: First Application Launch**
+**Step 3: First Application Launch**
 ```
-Client → Certificate Manager: Load certificate
-Client → License Manager: Load license token
-Client → Validator: Validate certificate (checks expiry, chain)
+Client → Certificate Manager: Load certificate from keystore
+Client → License Manager: Load encrypted license token
+Client → Validator: Validate certificate (expiry, chain)
 Client → Validator: Validate license token
-    - Verify JWT signature
-    - Check cert fingerprint matches
-    - Check cert serial matches
-    - Check subscription dates
+  - Verify JWT signature using embedded server public key
+  - Check cert fingerprint matches token "sub" claim
+  - Check cert serial matches token "cert_serial" claim
+  - Check subscription_end date
 Client → Application: Grant access to entitled features
 ```
 
 ### Monthly License Renewal
 
-**Background Process (Client)**
+**Background Process (7 days before expiry)**
 ```
-Client → Scheduler: 7 days before expiry
+Client → Scheduler: Trigger renewal check
 Client → Certificate Manager: Load certificate + private key
-Client → mTLS Client: Configure SSL context
+Client → HTTP Client: Configure mTLS with client certificate
 Client → Server (mTLS): POST /api/license/renew {device_id}
-```
 
-**Server Validation**
-```
 Server → TLS Layer: Validate client certificate
-Server → Certificate Validator: Check not revoked
-Server → Database: Extract cert fingerprint from certificate
-Server → Database: Lookup subscription by cert fingerprint
+Server → Certificate Validator: Check certificate not revoked
+Server → Database: Extract cert fingerprint, lookup subscription
 Server → Payment System: Verify payment received
-```
 
-**If Payment Received**
-```
-Server → License Token Service: Generate new JWT
+IF payment received:
+  Server → License Token Service: Generate new JWT
     - Same cert fingerprint
     - Same cert serial
     - Same device_id
     - New subscription_end date
     - New grace_period_end date
-Server → Client (mTLS): Return new license_token
-Client → Device Storage: Encrypt and store new token
-Client → UI: Show "License renewed successfully"
-```
+  Server → Database: Store new license token
+  Server → Client (mTLS): Return {status: 'renewed', token: <new_jwt>}
+  Client → Encrypted Storage: Store new license token
+  Client → UI: Show "License renewed successfully"
 
-**If Payment Not Received (Grace Period)**
-```
-Server → Client (mTLS): Return grace_period status {grace_period_end, message}
-Client → License Manager: Continue using existing token
-Client → UI: Show "Payment pending - X days remaining"
-Client → Scheduler: Check again in 24 hours
+IF payment NOT received (Grace Period):
+  Server → Client (mTLS): Return {status: 'grace_period', grace_period_end, message}
+  Client → License Manager: Continue using existing token
+  Client → UI: Show "Payment pending - X days remaining in grace period"
+  Client → Scheduler: Check again in 24 hours
 ```
 
 ### Device Migration (Hardware Upgrade)
 
 **Step 1: Export on Old Device**
 ```
-User → Old Client: Click "Migrate License"
+User → Old Client: Click "Migrate License to New Device"
 Old Client → Certificate Manager: Load certificate
 Old Client → Device ID: Get current device_id
 Old Client → Server (mTLS): POST /api/license/migrate/initiate {current_device_id}
-Server → Certificate Validator: Validate cert (mTLS)
-Server → Database: Verify active license for device
-Server → Migration Service: Generate migration_token (24h expiry)
-Server → Old Client (mTLS): Return migration_token
-Old Client → UI: Display token for user to copy
+
+Server → Certificate Validator: Validate cert via mTLS
+Server → Database: Verify active license for device_id
+Server → Migration Service: Generate migration_token (24h expiry, single-use)
+Server → Database: Store migration record
+Server → Old Client (mTLS): Return {migration_token, expires_at}
+
+Old Client → UI: Display migration token prominently
+Old Client → UI: Show instructions: "Enter this token on your new device within 24 hours"
 ```
 
 **Step 2: Import on New Device**
 ```
-User → New Device: Install app, install certificate (same cert!)
-User → New Client: Click "Import License", paste token
-New Client → Certificate Manager: Load certificate
+User → New Device: Install app
+User → New Device: Install SAME client certificate (via backup/export)
+User → New Client: Click "Import License from Another Device"
+User → New Client: Enter migration token
+
+New Client → Certificate Manager: Load certificate (must be same as old device)
 New Client → Device ID: Get new device_id
-New Client → Server (mTLS): POST /api/license/migrate/complete
-    {migration_token, new_device_id}
+New Client → Server (mTLS): POST /api/license/migrate/complete 
+  {migration_token, new_device_id}
 
-Server → Certificate Validator: Validate cert (mTLS)
+Server → Certificate Validator: Validate cert via mTLS
 Server → Database: Lookup migration_token
-Server → Validator: Check cert fingerprint matches
-Server → Validator: Check cert serial matches
+Server → Validator: Check cert fingerprint matches original migration request
+Server → Validator: Check cert serial matches original request
+Server → Validator: Check token not expired
 Server → Database: BEGIN TRANSACTION
-    - Deactivate old device license
-    - Create new license record for new_device_id
-    - Generate new license_token for new device
-    - Delete migration_token
+  - Deactivate old device license (set is_active=false)
+  - Create new license record for new_device_id
+  - Generate new JWT license token for new device
+  - Delete migration_token
 Server → Database: COMMIT
-Server → New Client (mTLS): Return new license_token
-New Client → Device Storage: Store encrypted token
-New Client → UI: Show "Migration successful"
+Server → New Client (mTLS): Return {license_token, subscription_info}
+
+New Client → Encrypted Storage: Store new license token
+New Client → UI: Show "Migration successful! Your license is now active on this device."
+
+Old Client (next startup): 
+  → Attempt license validation
+  → Server returns error 2003: Device not authorized
+  → UI: Show "This license has been migrated to another device"
 ```
-
-## Appendix D: Key Management Details
-
-### Private CA Keys
-
-**Root CA (Offline)**
-```bash
-# Location: /etc/ca/root-ca/root-ca.key
-# Validity: 20 years
-# Usage: Sign intermediate CA certificates only
-# Security: 
-#   - Stored offline on encrypted USB drive
-#   - 4096-bit RSA key
-#   - Passphrase protected
-#   - Only brought online for intermediate CA signing
-```
-
-**Intermediate CA (Online)**
-```bash
-# Location: /etc/ca/intermediate-ca/intermediate-ca.key
-# Validity: 10 years
-# Usage: Sign client certificates
-# Security:
-#   - Stored on secure server
-#   - 4096-bit RSA key
-#   - Passphrase stored in environment variable
-#   - File permissions: chmod 600
-#   - Directory permissions: chmod 700
-```
-
-### License Server Keys
-
-**License Signing Key (Online)**
-```bash
-# Location: /etc/license-server/license-signing.key
-# Purpose: Sign JWT license tokens
-# Security:
-#   - Separate from CA keys
-#   - 2048-bit RSA key (sufficient for JWT)
-#   - Passphrase stored in environment variable
-#   - File permissions: chmod 600
-#   - Regular rotation (annually)
-
-# Generate license signing key pair:
-openssl genrsa -aes256 -out license-signing.key 2048
-openssl rsa -in license-signing.key -pubout -out license-signing.pub
-
-# The public key (license-signing.pub) is embedded in client applications
-# for JWT signature verification
-```
-
-**Key Rotation Process**
-```
-1. Generate new license signing key pair
-2. Update server configuration with new private key
-3. Embed both old and new public keys in client app
-4. Deploy new client version
-5. After 90% client adoption, switch to new key for signing
-6. After 180 days, remove old public key from clients
-```
-
-**Important Separation:**
-- CA keys are for certificate issuance
-- License keys are for JWT signing
-- Compromised license key ≠ compromised certificate infrastructure
-- Can rotate license keys without affecting certificates
-- Can revoke certificates without affecting license key security
 
 ---
 
 ## Conclusion
 
-This license management system provides a robust, secure solution for subscription-based licensing with extended offline capabilities. The two-layer architecture separates identity (certificates) from authorization (licenses), providing:
+This specification provides a comprehensive design for a production-ready subscription licensing system with certificate-based authentication. The system achieves:
 
-**Security Benefits:**
-- Strong cryptographic identity through Private CA
+**Security:**
+- Strong cryptographic identity through Private CA infrastructure
 - Flexible subscription management through JWT tokens
-- Separate keys prevent compromise propagation
+- Separation of CA and license signing keys prevents compromise propagation
 - Defense in depth through layered authentication
 
-**Operational Benefits:**
+**Operational Excellence:**
 - Extended offline operation for full subscription periods
 - Flexible subscription management without certificate reissuance
-- Graceful handling of payment delays
-- Secure device migration for hardware upgrades
+- Graceful handling of payment delays through grace periods
+- Secure device migration for legitimate hardware upgrades
 
-**User Experience Benefits:**
+**User Experience:**
 - Single enrollment process for both certificate and license
 - Transparent authentication using certificates
 - Clear grace period handling with user-friendly messaging
 - Simple migration workflow for legitimate device transfers
 
+**Platform Support:**
+- Multi-platform design (Windows, macOS, Linux)
+- Platform-specific secure storage integration
+- Stable device identification across all platforms
+- Reference implementation available for macOS
+
 The system is designed for production deployment with comprehensive monitoring, clear operational procedures, and straightforward integration paths for future enhancements.
+
+**Reference Implementation:**
+Complete working code examples for Java client (macOS) and PHP server are available in `ReferenceImplGuide.md`, including:
+- JDK 21+ implementation with modern Java features
+- Containerized server deployment
+- Build scripts and packaging
+- Testing examples
+- Development environment setup
