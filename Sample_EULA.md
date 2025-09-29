@@ -14,7 +14,7 @@
 We grant You a limited, non-exclusive, non-transferable, revocable license to install and use the free tier of the Software ("Free Tier") without charge for your personal or internal business purposes. The Free Tier includes basic functionality and does not require account creation or subscription.
 
 ### 1.2 Premium Tier License (Subscription-Based)
-Subject to your compliance with this Agreement and payment of applicable subscription fees, We grant You a limited, non-exclusive, non-transferable, revocable license to install and use the premium features of the Software ("Premium Tier") on a single device during the active subscription period.
+Subject to your compliance with this Agreement and payment of applicable subscription fees, We grant You a limited, non-exclusive, non-transferable, revocable license to install and use the premium features of the Software ("Premium Tier") on the number of devices specified in your subscription tier during the active subscription period.
 
 ### 1.3 Premium Tier Requirements
 Access to Premium Tier features requires:
@@ -23,9 +23,20 @@ Access to Premium Tier features requires:
 - Maintaining an active, paid subscription
 - Compliance with all terms of this Agreement
 - Successful license validation as described in Section 3
+- Adherence to the device limit specified in your subscription tier
 
-### 1.4 Single Device License (Premium Tier Only)
-Each Premium Tier license is bound to a single device. You may migrate your Premium license to a different device using the migration feature provided in the Software, subject to the limitations described in Section 2.4.
+### 1.4 Device Limit License (Premium Tier Only)
+Each Premium Tier subscription has a specified device limit based on your subscription plan (e.g., 1 device, 5 devices, 10 devices, or more). You may:
+- Enroll up to the number of devices specified in your subscription tier
+- View all enrolled devices via the customer portal
+- Revoke device certificates via the portal to free up enrollment slots
+- Migrate licenses between devices using the migration feature (subject to Section 2.4)
+
+**Device Identification:** During enrollment, you must provide a device name and the Software will automatically detect the platform to help you identify your enrolled devices in the portal (e.g., "Work Laptop - Windows", "Home iMac - macOS").
+
+**Device Limit Enforcement:** You cannot enroll additional devices once your device limit is reached. You must revoke an existing device certificate via the customer portal before enrolling a new device.
+
+**Lost or Stolen Devices:** If a device is lost or stolen, you must immediately revoke its certificate via the customer portal to free up the enrollment slot and prevent unauthorized use.
 
 ---
 
@@ -43,15 +54,33 @@ You may NOT:
 If using Premium Tier features, You may NOT:
 - Attempt to circumvent or disable the license validation mechanism
 - Share your license credentials, certificates, or license tokens with others
-- Use the Premium features on more than one device simultaneously
+- Use Premium features on more devices simultaneously than your subscription tier allows
 - Extract or attempt to extract license validation keys or certificates for unauthorized use
 - Downgrade to Free Tier to avoid payment while retaining Premium feature data
+- Exceed your subscription's device limit by sharing enrollment tokens with others
+- Provide false or misleading device identification information
 
 ### 2.3 No Unbundling
-The Software is licensed as a single product. Its component parts may not be separated for use on more than one device.
+The Software is licensed as a single product. Its component parts may not be separated for use on more than the permitted number of devices.
 
 ### 2.4 License Migration (Premium Tier Only)
-You may migrate your Premium license to a new device up to [NUMBER] times per [TIME PERIOD] using the built-in migration feature. Each migration permanently deactivates the license on the previous device. Abuse of the migration feature may result in license suspension.
+You may migrate your Premium license between devices using the built-in migration feature. Migration does not change your device limit:
+- Migration transfers a license from one device to another
+- The old device's certificate is permanently deactivated
+- Migration does not increase your device limit
+- If migrating to a device not previously enrolled and already at your device limit, you must revoke another device first
+- You may perform up to [NUMBER] migrations per [TIME PERIOD] per device
+- Abuse of the migration feature may result in license suspension
+
+### 2.5 Device Management via Portal (Premium Tier Only)
+You are responsible for managing your enrolled devices via the customer portal:
+- You must provide accurate device names during enrollment for your own identification purposes
+- You may view all enrolled devices at any time via the portal
+- You may revoke device certificates at any time via the portal
+- Revoked device certificates are added to the Certificate Revocation List (CRL) immediately
+- You must revoke a device before enrolling a new device if at your device limit
+- Lost or stolen devices should be revoked immediately via the portal
+- Device revocation is permanent and cannot be undone
 
 ---
 
@@ -74,6 +103,7 @@ The Free Tier does not transmit any information to Our servers during normal ope
 
 a) **Initial Activation**: When first subscribing to Premium, the Software will connect to Our servers to:
    - Validate your enrollment token
+   - Check device limit compliance
    - Obtain your client certificate
    - Receive your initial license token
 
@@ -92,6 +122,11 @@ d) **License Migration**: When transferring your Premium license to a new device
    - Validate the migration request
    - Deactivate the license on the old device
    - Activate the license on the new device
+
+e) **Device Management**: When managing enrolled devices via the portal, the portal connects to Our servers to:
+   - List all enrolled devices for your account
+   - Revoke device certificates
+   - Generate new enrollment tokens (subject to device limit)
 
 ### 3.4 Offline Operation (Premium Tier)
 Premium Tier features are designed to operate offline for the duration of your active subscription period. However, periodic network connectivity is required for license renewal and certificate management. Extended offline use beyond your subscription expiration date will result in loss of Premium functionality (reverting to Free Tier).
@@ -123,15 +158,20 @@ If you use Premium features with a firewall, you must allow outbound HTTPS conne
 When using Premium Tier features, the Software transmits the following information to Our servers during license validation:
 - Your client certificate (contains your name and organization as provided during enrollment)
 - Device identifier (hardware-based unique ID)
+- Device name (as provided by you during enrollment)
+- Platform information (operating system type)
 - License status and expiration dates
 - IP address (collected automatically by Our servers)
 - Software version number
+- Enrollment and last-seen timestamps
 
 ### 4.3 Purpose of Collection (Premium Tier)
 We collect this information solely to:
 - Verify your subscription status
+- Enforce device limit compliance
 - Prevent unauthorized license sharing
 - Manage license activations and migrations
+- Provide device management features in the customer portal
 - Provide customer support
 - Comply with legal obligations
 
@@ -146,7 +186,17 @@ We do NOT collect or transmit:
 - Analytics or telemetry data
 - Any information from Free Tier users
 
-### 4.6 Privacy Policy
+### 4.6 Device Management Data (Premium Tier Only)
+The customer portal displays information about your enrolled devices to help you manage your device limit:
+- Device names (as provided by you)
+- Platform information
+- Enrollment dates
+- Last-seen timestamps
+- Certificate status (active/revoked)
+
+This information is visible only to you when logged into your account.
+
+### 4.7 Privacy Policy
 Our complete Privacy Policy is available at [URL]. By using the Software, you agree to the data practices described in Our Privacy Policy.
 
 ---
@@ -155,20 +205,26 @@ Our complete Privacy Policy is available at [URL]. By using the Software, you ag
 
 ### 5.1 Local Storage
 When using Premium Tier features, the Software stores the following on your device:
-- Your client certificate and private key (in macOS Keychain)
+- Your client certificate and private key (in platform-specific secure storage)
 - Encrypted license tokens (in application support directory)
 - Premium feature configuration files
 
 Free Tier users do not have certificates or license tokens stored on their devices.
 
-### 5.2 Security Responsibility (Premium Tier)
+### 5.2 Platform-Specific Storage Locations
+- **Windows**: Windows Certificate Store (`Current User\Personal\Certificates`)
+- **macOS**: Keychain Services (`login.keychain`)
+- **Linux**: Encrypted file storage in `~/.config/app-name/certificates/`
+
+### 5.3 Security Responsibility (Premium Tier)
 If you subscribe to Premium features, you are responsible for:
 - Maintaining the security of your device and operating system
 - Protecting your certificate and license credentials
 - Not sharing your certificate or private key with others
 - Promptly reporting any suspected compromise to Us
+- Revoking device certificates via the portal if a device is lost or stolen
 
-### 5.3 Certificate Ownership (Premium Tier)
+### 5.4 Certificate Ownership (Premium Tier)
 The client certificates remain Our property and are licensed to You for the sole purpose of validating your Premium subscription. Upon termination of your subscription, certificates may be revoked, and Premium features will revert to Free Tier functionality.
 
 ---
@@ -176,32 +232,59 @@ The client certificates remain Our property and are licensed to You for the sole
 ## 6. SUBSCRIPTION TERMS (PREMIUM TIER)
 
 ### 6.1 Free Tier - No Subscription Required
-Free Tier features are available without subscription, payment, or account creation. You may use Free Tier features indefinitely at no cost.
+Free Tier features are available without subscription, payment, or account creation. You may use Free Tier features indefinitely at no cost on unlimited devices.
 
 ### 6.2 Premium Tier - Subscription Fees
 Use of Premium features requires an active paid subscription. Subscription fees are billed:
 - **Monthly**: Every 30 days
 - **Annual**: Every 365 days
 
-### 6.3 Payment (Premium Tier)
+Subscription tiers with different device limits may have different pricing.
+
+### 6.3 Device Limits by Subscription Tier
+Premium subscriptions include a specified device limit:
+- **Personal Plan**: [1-2] devices
+- **Professional Plan**: [5] devices
+- **Team Plan**: [10] devices
+- **Enterprise Plan**: [Custom] device limit
+
+Device limits are enforced at the time of enrollment token generation. You cannot enroll devices beyond your subscription tier's limit.
+
+### 6.4 Payment (Premium Tier)
 Payment is due in advance. Failure to pay subscription fees will result in:
 - Inability to renew your Premium license token
 - Grace period activation
 - Eventual loss of Premium features (reversion to Free Tier)
+- Inability to generate new enrollment tokens
 
-### 6.4 Automatic Renewal (Premium Tier)
+### 6.5 Automatic Renewal (Premium Tier)
 Premium subscriptions automatically renew unless you cancel before the renewal date. You may cancel at any time through [your account portal/Our website]. Upon cancellation, Premium features will remain active until the end of your paid period, then automatically revert to Free Tier.
 
-### 6.5 Refund Policy
+### 6.6 Upgrading Device Limits
+You may upgrade to a higher device limit tier at any time. The upgrade will:
+- Take effect immediately
+- Allow enrollment of additional devices up to the new limit
+- Be prorated for the remainder of your current billing period
+- Continue at the new tier price upon renewal
+
+### 6.7 Downgrading Device Limits
+You may downgrade to a lower device limit tier. The downgrade will:
+- Take effect at the end of your current billing period
+- Require you to revoke devices via the portal if currently over the new limit
+- Continue at the new tier price upon renewal
+
+If you have more enrolled devices than your new device limit permits, you must revoke devices via the portal before the downgrade takes effect, or the downgrade will be blocked.
+
+### 6.8 Refund Policy
 [Insert your refund policy here, e.g., "Refunds are available within 30 days of initial Premium subscription purchase. No refunds for subsequent renewals."]
 
-### 6.6 Price Changes
+### 6.9 Price Changes
 We reserve the right to change subscription prices with [30] days' notice. Price changes do not affect your current subscription period.
 
-### 6.7 Voluntary Downgrade
+### 6.10 Voluntary Downgrade
 You may voluntarily downgrade from Premium to Free Tier at any time. Upon downgrade:
 - Premium features will be disabled at the end of your paid period
-- Your certificate will be revoked
+- All enrolled device certificates will be revoked
 - Free Tier features will remain fully functional
 - Data created with Premium features may become inaccessible or limited
 
@@ -221,23 +304,25 @@ You may terminate your Premium subscription at any time by:
 
 Upon Premium subscription termination:
 - Premium features will be disabled
-- Your certificate will be revoked
+- All enrolled device certificates will be revoked
 - The Software will revert to Free Tier functionality
 - Your account data will be deleted per Our data retention policy
 
 ### 7.3 Premium Tier - Involuntary Termination
 We may suspend or terminate your Premium subscription immediately if:
 - You violate any term of this Agreement
+- You exceed your subscription's device limit through unauthorized means
 - Your payment method fails repeatedly
 - We detect fraudulent activity or license abuse
 - We suspect certificate compromise or unauthorized sharing
 - Required by law or legal process
 
-Upon involuntary termination, Premium features will be disabled and the Software will revert to Free Tier.
+Upon involuntary termination, Premium features will be disabled, all enrolled device certificates will be revoked, and the Software will revert to Free Tier.
 
 ### 7.4 Effect of Premium Termination
 Upon Premium subscription termination for any reason:
 - Your right to use Premium features immediately ceases
+- All enrolled device certificates are revoked and added to the CRL
 - Free Tier features remain fully functional
 - All certificates and license tokens are revoked
 - No refund of subscription fees (unless required by law)
@@ -250,6 +335,7 @@ Upon Premium subscription termination for any reason:
 ### 8.1 Free Tier Features
 The Free Tier includes:
 - [List basic features available in Free Tier]
+- No device limits - use on unlimited devices
 - No network connectivity required
 - No account creation required
 - No data transmission to Our servers
@@ -258,6 +344,9 @@ The Free Tier includes:
 ### 8.2 Premium Tier Features
 Premium subscription adds:
 - [List advanced features available in Premium Tier]
+- Device limit based on subscription tier (1, 5, 10, or more devices)
+- Device management via customer portal
+- Secure license migration between devices
 - Priority customer support
 - [Additional premium benefits]
 
@@ -267,6 +356,7 @@ We reserve the right to:
 - Move features between tiers with reasonable notice
 - Discontinue features with reasonable notice
 - Modify feature functionality
+- Adjust device limits for subscription tiers
 
 Existing Premium subscribers will be notified of material changes at least [30] days in advance.
 
@@ -295,6 +385,7 @@ If You provide suggestions, ideas, or feedback about the Software, We may use su
 - **The results obtained from use of the Software will be accurate or reliable**
 - **Any errors in the Software will be corrected**
 - **Premium features will always be available or function identically to Free features**
+- **Device limit enforcement will prevent all unauthorized sharing**
 
 **THE ENTIRE RISK ARISING OUT OF USE OR PERFORMANCE OF THE SOFTWARE REMAINS WITH YOU.**
 
@@ -327,7 +418,7 @@ We reserve the right to modify this Agreement at any time. Changes will be effec
 - Notice provided through the Software or via email (Premium users)
 - Your continued use of the Software after notice
 
-Material changes will require your acceptance before continued use. Changes affecting Premium subscribers will be communicated via email.
+Material changes will require your acceptance before continued use. Changes affecting Premium subscribers (including device limit adjustments) will be communicated via email at least [30] days in advance.
 
 ---
 
@@ -390,12 +481,16 @@ Website: [website]
 
 1. You have read and understand this Agreement
 2. You agree to be bound by its terms and conditions
-3. You understand that Free Tier operates completely offline with no data collection
+3. You understand that Free Tier operates completely offline with no data collection and no device limits
 4. You understand that Premium Tier requires network connectivity for license validation
-5. You consent to the Premium Tier data collection practices described herein (if subscribing)
-6. You are authorized to enter into this Agreement
-7. You are at least 18 years of age (or the age of majority in your jurisdiction)
-8. You understand that canceling Premium subscription reverts the Software to Free Tier
+5. You understand that Premium Tier has device limits based on your subscription tier
+6. You understand your responsibility to manage enrolled devices via the customer portal
+7. You understand that you must revoke devices via the portal to free up enrollment slots when at your device limit
+8. You understand that lost or stolen devices should be revoked immediately
+9. You consent to the Premium Tier data collection practices described herein (if subscribing)
+10. You are authorized to enter into this Agreement
+11. You are at least 18 years of age (or the age of majority in your jurisdiction)
+12. You understand that canceling Premium subscription reverts the Software to Free Tier
 
 **IF YOU DO NOT AGREE TO THESE TERMS, DO NOT INSTALL OR USE THE SOFTWARE.**
 

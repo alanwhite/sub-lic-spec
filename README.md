@@ -22,6 +22,9 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
 
 ### Subscription Management
 - **Monthly and annual** subscription models
+- **Configurable device limits** per subscription (1, 5, 10+ devices)
+- **Device management** via customer portal for enrollment tracking and revocation
+- **User-friendly device identification** (device name + platform) for easy management
 - **Grace periods**: 5 days (monthly) / 14 days (annual)
 - **Extended offline operation** for full subscription periods
 - **Automatic renewal** with background checks
@@ -33,10 +36,18 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
 - Linux (encrypted storage)
 - Cross-platform device identification
 
+### Device Management
+- **Portal-based device enrollment tracking** with identifying information
+- **Manual device revocation** to free up enrollment slots
+- **Device limit enforcement** prevents unlimited certificate sharing
+- **Lost device recovery** via portal-based certificate revocation
+- **Secure device transfer** for hardware upgrades via migration feature
+
 ### License Migration
 - **Secure device transfer** for hardware upgrades
 - **24-hour migration tokens** with single-use validation
 - **Certificate-verified transfers** preventing unauthorized moves
+- **Does not increase device limit** - transfers license between devices
 
 ## Architecture
 
@@ -129,15 +140,20 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
 1. **Portal: Generate Enrollment Token**
    ```
    User logs into customer portal
-   → Requests enrollment token
+   → Verifies active subscription
+   → System checks device limit
+   → If at limit: Must revoke existing device first
+   → If under limit: Requests enrollment token
    → Receives single-use token (7-day validity)
    ```
 
 2. **Client: Certificate Enrollment**
    ```
    User enters token in application
+   → Provides device name for identification (e.g., "Work Laptop - Windows")
    → Client generates RSA key pair
-   → Submits CSR to server (TLS + token)
+   → Submits CSR + device info to server (TLS + token)
+   → Server validates token and checks device limit
    → Receives certificate + initial license token
    → Installs certificate in platform keystore
    ```
@@ -149,6 +165,52 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
    → Checks subscription status
    → Grants access to entitled features
    ```
+
+### Device Management
+
+**Viewing Enrolled Devices:**
+```
+User logs into customer portal
+→ Views list of enrolled devices with:
+  - Device name (user-provided)
+  - Platform (Windows, macOS, Linux)
+  - Enrollment date
+  - Last seen timestamp
+  - Certificate status (active/revoked)
+→ Can revoke specific device certificates
+```
+
+**Device Limit Enforcement:**
+- Each subscription has a device limit (1, 5, 10+)
+- Cannot enroll additional devices once limit reached
+- Must revoke existing device via portal to free up slot
+- Device name and platform help identify which device to revoke
+- Revoked certificates added to CRL immediately
+
+**Enrolling Additional Devices:**
+```
+If under device limit:
+  → Generate new enrollment token
+  → Install app on new device
+  → Enter token and device name
+  → Complete enrollment
+
+If at device limit:
+  → View enrolled devices in portal
+  → Revoke device no longer needed
+  → Generate new enrollment token
+  → Enroll new device
+```
+
+**Lost Device Recovery:**
+```
+User logs into portal
+→ Views enrolled devices list
+→ Identifies lost device by name/platform/date
+→ Revokes lost device certificate
+→ Device limit slot freed immediately
+→ Can enroll replacement device if needed
+```
 
 ### License Renewal (Background)
 
@@ -162,26 +224,40 @@ Client checks subscription 7 days before expiry
 
 ### Device Migration
 
+**When to Use Migration:**
+- Replacing hardware (new computer, upgraded device)
+- Transferring license to different device
+- **Note:** Migration does not bypass device limits
+
+**Migration Process:**
+
 ```
 Old Device: 
   → Request migration token (mTLS)
   → Display token to user
 
 New Device:
-  → Install same certificate
+  → Install same certificate (must be previously enrolled OR have available device slot)
   → Submit migration token + new device ID (mTLS)
   → Receive new license token
   → Old device license deactivated
+
+Important:
+  - Migration transfers license between devices
+  - Does not increase your device limit
+  - If new device not previously enrolled and at limit, must revoke another device first
 ```
 
 ## API Endpoints
 
 ### Portal (Session Auth)
-- `POST /portal/enrollment/generate` - Generate enrollment token
-- `POST /portal/account/delete/confirm` - Delete account & revoke certificates
+- `POST /portal/enrollment/generate` - Generate enrollment token (checks device limit)
+- `GET /portal/devices` - List enrolled devices for user
+- `DELETE /portal/devices/{fingerprint}` - Revoke specific device certificate
+- `POST /portal/account/delete/confirm` - Delete account & revoke all certificates
 
 ### Certificate Management (TLS + Token)
-- `POST /api/certificate/enroll` - Enroll with token + CSR
+- `POST /api/certificate/enroll` - Enroll with token + CSR + device info
 
 ### License Operations (mTLS Required)
 - `POST /api/license/activate` - Initial activation
@@ -204,15 +280,18 @@ New Device:
 
 - **Device binding**: Hardware-backed identification with encrypted storage
 - **Certificate-license binding**: Cryptographic binding prevents separation
+- **Device limit enforcement**: Configurable limits prevent unlimited sharing
+- **Portal-based management**: Manual revocation requires authentication
 - **Migration control**: Secure, audited process for legitimate transfers
 - **Offline validation**: Both certificate and license checked locally
 
 ### Threat Mitigation
 
 - **Token extraction**: Device-specific encryption makes tokens useless elsewhere
-- **Certificate sharing**: Requires platform keystore access + private key extraction
+- **Certificate sharing**: Requires platform keystore access + private key extraction + device limit allows controlled sharing within subscription
 - **License theft**: Cannot use without matching certificate fingerprint
 - **Man-in-the-middle**: mTLS provides mutual authentication
+- **Unlimited sharing**: Device limits prevent casual distribution
 
 ## Platform-Specific Implementation
 
@@ -230,9 +309,11 @@ New Device:
 
 ### Key Metrics
 - Certificate issuance/renewal rates
+- Device enrollment patterns and limit utilization
 - License activation/renewal success rates
 - Grace period utilization
 - Migration frequency
+- Device revocation patterns
 - mTLS handshake failures
 
 ### Certificate Management
@@ -247,12 +328,19 @@ New Device:
 - Grace periods: 5 days (monthly), 14 days (annual)
 - Device-encrypted storage
 
+### Device Management
+- Device limits enforced at enrollment token generation
+- Portal provides device listing and revocation
+- Certificate revocation via CRL (24-hour update cycle)
+- User-friendly device identification
+
 ## Documentation
 
 **[Complete Specification (spec.md)](spec.md)** - Comprehensive technical documentation including:
 - System architecture and security model
 - Certificate and license workflows
 - Client certificate enrollment process
+- Device identification and management
 - API endpoint specifications
 - Server implementation (PHP)
 - Client implementation examples
@@ -261,6 +349,18 @@ New Device:
 - Deployment and operational procedures
 - Error codes and troubleshooting
 
+**[Reference Implementation Guide (ReferenceImplGuide.md)](ReferenceImplGuide.md)** - Detailed implementation guide with:
+- Complete project structure
+- Development environment setup (containerized server, native client)
+- Configuration management
+- Database migrations
+- Private CA setup scripts
+- Server implementation (PHP in Docker containers)
+- Client implementation (Java 25 on macOS)
+- Build and packaging
+- Testing strategy
+- Deployment procedures
+
 ## Error Codes
 
 | Code | Description | Action |
@@ -268,6 +368,7 @@ New Device:
 | 1001 | Invalid client certificate | Re-enroll |
 | 1007 | Certificate expired | Renew certificate |
 | 1008 | Certificate revoked | Contact support |
+| 1018 | Device limit reached | Revoke device in portal |
 | 2001 | License not activated | Activate license |
 | 2002 | Subscription expired | Renew subscription |
 | 2008 | License-certificate mismatch | Re-activate |
@@ -294,7 +395,8 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 - [ ] Family/team sharing with sub-certificates
 - [ ] Usage-based billing integration
 - [ ] Certificate-based SSO
+- [ ] Mobile platform support (iOS, Android)
 
 ---
 
-**Note**: This system is designed for production use with legitimate subscribers. It focuses on preventing casual sharing while maintaining excellent user experience for authorized users.
+**Note**: This system is designed for production use with legitimate subscribers. It focuses on preventing casual sharing while maintaining excellent user experience for authorized users. Device limits provide flexible multi-device support while preventing unlimited distribution.
