@@ -41,11 +41,6 @@ Based on the ReferenceImplGuide.md, when implementing this specification:
 - **Build**: `mvn clean package` or `client/java-desktop/build.sh`
 - **Test**: `mvn test`
 
-### Client (Flutter Multi-platform)
-- **Build**: `client/flutter/build.sh` (builds all platforms)
-- **Test**: `flutter test`
-- **Code Generation**: `flutter pub run build_runner build --delete-conflicting-outputs`
-
 ### Certificate Authority Setup
 - **Initialize Root CA**: `ca/scripts/01-setup-root-ca.sh`
 - **Setup Intermediate CA**: `ca/scripts/02-setup-intermediate-ca.sh`
