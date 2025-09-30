@@ -1,0 +1,33 @@
+{
+    "name": "license-server/subscription-licensing",
+    "description": "Subscription licensing system with certificate authentication",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1",
+        "ext-openssl": "*",
+        "ext-pdo": "*",
+        "ext-mysqli": "*",
+        "firebase/php-jwt": "^6.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "squizlabs/php_codesniffer": "^3.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:coverage": "phpunit --coverage-html coverage",
+        "lint": "phpcs --standard=PSR12 src/",
+        "lint:fix": "phpcbf --standard=PSR12 src/"
+    }
+}

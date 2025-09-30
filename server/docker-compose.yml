@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # PHP Web Server with Apache
+  web:
+    image: php:8.1-apache
+    container_name: license-server-web
+    ports:
+      - "${TLS_PORT:-8443}:443"      # TLS endpoint
+      - "${MTLS_PORT:-9443}:9443"    # mTLS endpoint
+      - "8080:80"                     # HTTP (redirect to HTTPS)
+    volumes:
+      # Mount entire project directory
+      - ./:/var/www/html
+
+      # Apache configuration
+      - ./docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf
+      - ./docker/apache/mtls.conf:/etc/apache2/sites-available/mtls.conf
+
+      # SSL certificates
+      - ./docker/ssl:/etc/ssl/certs-custom
+
+      # CA certificates (read-only)
+      - ../ca/root-ca:/etc/ca/root-ca:ro
+      - ../ca/intermediate-ca:/etc/ca/intermediate-ca:ro
+
+      # License signing keys
+      - ./docker/license-keys:/etc/license-server:ro
+
+      # Logs
+      - ./logs:/var/log/license-server
+    environment:
+      - APACHE_RUN_USER=www-data
+      - APACHE_RUN_GROUP=www-data
+      - APACHE_LOG_DIR=/var/log/apache2
+    env_file:
+      - .env
+    depends_on:
+      - db
+    networks:
+      - license-network
+    command: >
+      bash -c "
+        # Install required PHP extensions
+        docker-php-ext-install pdo pdo_mysql mysqli &&
+
+        # Enable Apache modules
+        a2enmod ssl rewrite headers &&
+
+        # Enable both sites (TLS and mTLS)
+        a2ensite 000-default mtls &&
+
+        # Set permissions
+        chown -R www-data:www-data /var/www/html &&
+
+        # Start Apache
+        apache2-foreground
+      "
+
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: license-server-db
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${DB_DATABASE:-license_system}
+      MYSQL_USER: ${DB_USERNAME:-license_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-license_password}
+    volumes:
+      # Persistent database storage
+      - db-data:/var/lib/mysql
+
+      # Custom MySQL configuration
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/custom.cnf
+    networks:
+      - license-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PHPMyAdmin (Development only)
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: license-server-phpmyadmin
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: db
+      PMA_USER: ${DB_USERNAME:-license_user}
+      PMA_PASSWORD: ${DB_PASSWORD:-license_password}
+    depends_on:
+      - db
+    networks:
+      - license-network
+    profiles:
+      - development  # Only start in development
+
+volumes:
+  db-data:
+    driver: local
+
+networks:
+  license-network:
+    driver: bridge

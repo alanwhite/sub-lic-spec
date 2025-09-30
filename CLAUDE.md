@@ -4,15 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **design specification repository** for a subscription licensing system with certificate authentication. It contains comprehensive documentation, not implementation code. The system uses a dual-layer security architecture with X.509 certificates for identity and JWT tokens for subscription management.
+This is a **design specification AND reference implementation repository** for a subscription licensing system with certificate authentication. It contains comprehensive documentation AND working implementation code. The system uses a dual-layer security architecture with X.509 certificates for identity and JWT tokens for subscription management.
 
 ## Repository Structure
 
+### Documentation
 - `spec.md` - Complete technical design specification (71KB detailed spec)
 - `ReferenceImplGuide.md` - Implementation guide with concrete examples and project structure (90KB+ detailed implementation)
 - `README.md` - Project overview with quick start guide
-- `CONTRIBUTING.md` - Contribution guidelines for specification improvements
+- `CONTRIBUTING.md` - Contribution guidelines
 - `Sample_EULA.md` - Example end-user license agreement with free and premium tiers
+
+### Implementation
+- `ca/` - Certificate Authority setup scripts and configurations (IMPLEMENTED)
+  - `docker-setup.sh` - Master setup script (runs in Docker)
+  - `scripts/` - CA initialization scripts (01-root-ca, 02-intermediate-ca, 03-license-keys)
+  - `config/` - OpenSSL configuration files
+- `server/` - PHP server implementation (IMPLEMENTED)
+  - `public/` - Web root with index.php entry point
+  - `src/` - PHP application code (controllers, services, models)
+  - `config/` - Configuration management
+  - `database/migrations/` - 7 SQL migration files
+  - `docker-compose.yml` - Container orchestration
+  - `docker-helper.sh` - Development helper commands
+- `client/macos-java/` - macOS Java client (IMPLEMENTED)
+  - `src/main/java/` - Java application code
+  - `pom.xml` - Maven build configuration (requires JDK 25)
+  - UI with enrollment and migration dialogs
 
 ## Architecture Overview
 
@@ -29,22 +47,34 @@ Key components:
 
 ## Common Development Tasks
 
-Based on the ReferenceImplGuide.md, when implementing this specification:
+### Certificate Authority
+```bash
+cd ca
+./docker-setup.sh  # Sets up entire CA infrastructure in Docker
+```
 
 ### Server (PHP)
-- **Build**: `server/build.sh` (creates deployable package)
-- **Test**: `composer run test` or `phpunit`
-- **Lint**: `composer run lint` or `phpcs --standard=PSR12 src/`
-- **Test Coverage**: `composer run test:coverage`
+```bash
+cd server
+./docker-helper.sh start      # Start all containers
+./docker-helper.sh stop       # Stop containers
+./docker-helper.sh migrate    # Run database migrations
+./docker-helper.sh logs       # View logs
+./docker-helper.sh shell      # Open shell in web container
+./docker-helper.sh shell-db   # Open MySQL shell
+composer run test             # Run tests (inside container)
+composer run lint             # Lint code (inside container)
+```
 
-### Client (Java Desktop)
-- **Build**: `mvn clean package` or `client/java-desktop/build.sh`
-- **Test**: `mvn test`
+### Client (macOS Java)
+```bash
+cd client/macos-java
+mvn clean package    # Build JAR
+mvn test             # Run tests
+java -jar target/license-client-1.0.0.jar  # Run application
+```
 
-### Certificate Authority Setup
-- **Initialize Root CA**: `ca/scripts/01-setup-root-ca.sh`
-- **Setup Intermediate CA**: `ca/scripts/02-setup-intermediate-ca.sh`
-- **Generate License Keys**: `ca/scripts/03-generate-license-keys.sh`
+**Important:** Client requires JDK 25 for Virtual Threads and modern Java features.
 
 ## Key Security Principles
 
@@ -76,14 +106,44 @@ The system uses 7 main tables:
 
 ## Implementation Notes
 
-- This is a **specification repository** - implementations would be separate projects
+- This is a **specification AND reference implementation repository**
+- Reference implementation provides complete scaffold with architecture and infrastructure
+- Core business logic is stubbed with TODO comments showing what to implement
 - Focus on security: certificate validation, proper mTLS configuration, secure storage
-- Platform-specific considerations documented for Windows (Certificate Store), macOS (Keychain), Linux (encrypted files)
+- Platform-specific considerations: macOS (Keychain) implemented, Windows/Linux in spec
 - Production deployment requires proper CA infrastructure and certificate management
+
+### Development Approach
+When adding new features:
+1. Review relevant section in `spec.md` for requirements
+2. Check `ReferenceImplGuide.md` for implementation patterns
+3. Locate the appropriate controller/service file in `server/src/`
+4. Implement the TODO-marked methods
+5. Add tests in `server/tests/` or `client/src/test/`
+6. Update documentation if behavior changes
+
+## Implementation Status
+
+**Completed:**
+- ✅ Certificate Authority setup (containerized, no host OpenSSL needed)
+- ✅ Server directory structure and configuration
+- ✅ Database schema (7 migration files)
+- ✅ Docker setup (docker-compose.yml, Apache configs for TLS/mTLS)
+- ✅ API structure (controllers with method stubs)
+- ✅ Service layer (PrivateCAService, LicenseTokenService with method stubs)
+- ✅ Client UI framework (Swing with enrollment and migration dialogs)
+- ✅ Client infrastructure (CertificateManager, DeviceIdentifier)
+
+**To Be Implemented (marked with TODO):**
+- ⏳ Server PHP business logic (certificate issuance, license generation, validation)
+- ⏳ Client Java business logic (HTTP client with mTLS, JWT validation, storage encryption)
+- ⏳ Tests (unit and integration)
+- ⏳ Portal UI pages (HTML/JS for web interface)
 
 ## Document Changes
 
-Recent updates (based on commit history):
-- `Sample_EULA.md` updated with free tier licensing terms
-- `ReferenceImplGuide.md` expanded with comprehensive implementation details
-- All files reflect this is a specification project, not implementation code
+Recent updates:
+- Repository transformed from specification-only to specification + reference implementation
+- Complete implementation scaffold added for CA, server, and client
+- `README.md` updated to reflect implementation status
+- `CLAUDE.md` updated with development commands and structure

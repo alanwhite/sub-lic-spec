@@ -1,0 +1,45 @@
+# CA Generated Files
+ca/root-ca/
+ca/intermediate-ca/
+
+# Server
+server/.env
+server/vendor/
+server/logs/*.log
+server/docker/ssl/*.key
+server/docker/ssl/*.crt
+server/docker/ssl/*.csr
+server/docker/license-keys/*.key
+server/docker/license-keys/*.pub
+
+# Client
+client/macos-java/target/
+client/macos-java/.idea/
+client/macos-java/*.iml
+
+# Docker
+server/docker/mysql/data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Build artifacts
+*.jar
+*.war
+*.zip
+*.tar.gz
+
+# Dependencies
+node_modules/
+vendor/

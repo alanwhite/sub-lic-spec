@@ -1,6 +1,8 @@
 # Subscription Licensing System with Certificate Authentication
 
-A production-ready subscription licensing system that enables clients to operate offline for extended periods while maintaining security through certificate-based authentication and preventing casual license sharing.
+A production-ready subscription licensing system with **complete reference implementation** that enables clients to operate offline for extended periods while maintaining security through certificate-based authentication and preventing casual license sharing.
+
+**This repository contains both the design specification AND a working reference implementation.**
 
 ## Overview
 
@@ -78,60 +80,132 @@ The dual-layer approach separates identity (WHO you are) from authorization (WHA
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Getting Started
+## Quick Start - Reference Implementation
 
-### Prerequisites
+### 1. Set Up Certificate Authority
 
-**Server Requirements:**
-- PHP 7.4+ with OpenSSL support
-- MySQL/PostgreSQL database
-- Web server (Apache/Nginx) with TLS/mTLS configuration
-- Private CA infrastructure setup
+```bash
+cd ca
+./docker-setup.sh
+```
 
-**Client Requirements:**
-- Platform-specific development environment 
-- OpenSSL libraries for certificate operations
-- Secure storage APIs (Keychain, KeyStore, etc.)
+This creates:
+- Root CA (offline, 20-year validity)
+- Intermediate CA (online, 10-year validity)
+- License signing keys (separate from CA)
 
-### Installation
+**No OpenSSL installation required** - runs entirely in Docker.
 
-1. **Set up Private CA**
-   ```bash
-   # Generate Root CA (offline, 20-year validity)
-   openssl genrsa -aes256 -out root-ca.key 4096
-   openssl req -new -x509 -days 7300 -key root-ca.key -out root-ca.crt
-   
-   # Generate Intermediate CA (online, 10-year validity)
-   openssl genrsa -aes256 -out intermediate-ca.key 4096
-   openssl req -new -key intermediate-ca.key -out intermediate-ca.csr
-   openssl x509 -req -in intermediate-ca.csr -CA root-ca.crt -CAkey root-ca.key \
-     -CAcreateserial -out intermediate-ca.crt -days 3650
-   ```
+### 2. Start Server (PHP + MySQL)
 
-2. **Generate License Signing Keys**
-   ```bash
-   # Separate from CA keys - used for JWT signing
-   openssl genrsa -aes256 -out license-signing.key 2048
-   openssl rsa -in license-signing.key -pubout -out license-signing.pub
-   ```
+```bash
+cd server
+cp .env.example .env
+# Edit .env with your configuration
+./docker-helper.sh start
+./docker-helper.sh migrate
+```
 
-3. **Configure Database**
-   ```bash
-   mysql -u root -p < schema/01_users_and_subscriptions.sql
-   mysql -u root -p < schema/02_certificates.sql
-   mysql -u root -p < schema/03_licenses.sql
-   ```
+Server endpoints:
+- TLS: https://localhost:8443
+- mTLS: https://localhost:9443
+- PHPMyAdmin: http://localhost:8081
 
-4. **Configure Web Server**
-   - See spec.md for Apache/Nginx configuration examples
-   - Configure dual authentication modes:
-     - TLS-only for certificate enrollment endpoints
-     - mTLS for all license operation endpoints
+### 3. Build Client (macOS Java)
 
-5. **Build Client Application**
-   - Embed CA certificate chain
-   - Embed license server public key
-   - Configure platform-specific certificate storage
+```bash
+cd client/macos-java
+mvn clean package
+java -jar target/license-client-1.0.0.jar
+```
+
+**Requirements:**
+- JDK 25 (for Virtual Threads and modern Java features)
+- macOS 10.15 or later
+- Maven 3.8+
+
+## Repository Structure
+
+This repository contains both specification and implementation:
+
+```
+sub-lic-spec/
+├── spec.md                 # Complete technical specification (71KB)
+├── ReferenceImplGuide.md   # Implementation guide (90KB+)
+├── README.md               # This file
+├── Sample_EULA.md          # Example EULA with free/premium tiers
+├── CONTRIBUTING.md         # Contribution guidelines
+│
+├── ca/                     # Certificate Authority (IMPLEMENTED)
+│   ├── docker-setup.sh     # Master CA setup script
+│   ├── scripts/            # CA initialization scripts
+│   ├── config/             # OpenSSL configurations
+│   └── README.md
+│
+├── server/                 # PHP Server Implementation (IMPLEMENTED)
+│   ├── public/             # Web root
+│   ├── src/                # PHP application code
+│   ├── config/             # Configuration files
+│   ├── database/           # Migrations and seeds
+│   ├── docker/             # Docker configs (Apache TLS/mTLS)
+│   ├── docker-compose.yml  # Container orchestration
+│   ├── docker-helper.sh    # Helper commands
+│   └── README.md
+│
+└── client/                 # Client Implementations
+    └── macos-java/         # macOS Java Client (IMPLEMENTED)
+        ├── src/            # Java source code
+        ├── pom.xml         # Maven configuration
+        └── README.md
+```
+
+## What's Implemented
+
+✅ **Certificate Authority**
+- Containerized CA setup (no host OpenSSL required)
+- Root CA and Intermediate CA generation
+- Separate license signing keys
+- OpenSSL configuration files
+
+✅ **Server (PHP)**
+- Docker-based deployment (PHP 8.1 + Apache + MySQL)
+- Database migrations (7 tables)
+- Dual-port configuration (TLS + mTLS)
+- API controllers (stubs for Certificate, License, Migration, Portal)
+- Service layer (PrivateCAService, LicenseTokenService)
+- Configuration management
+- Helper scripts for common operations
+
+✅ **Client (macOS Java)**
+- JDK 25 with modern Java features
+- macOS Keychain integration
+- Device identification (hardware-based)
+- Certificate management
+- Swing UI with enrollment and migration dialogs
+- Configuration management
+
+## Development Status
+
+This is a **reference implementation**. The architecture and infrastructure are complete:
+- ✅ Directory structure
+- ✅ Configuration files
+- ✅ Database schema
+- ✅ Docker setup
+- ✅ Build system (Maven, Composer)
+- ✅ API structure
+- ✅ UI framework
+
+Core business logic is stubbed - marked with `TODO` comments showing what needs to be implemented. This provides a complete scaffold for building a production system.
+
+## Prerequisites
+
+**Development Machine:**
+- Docker + Docker Compose
+- JDK 25
+- Maven 3.8+
+- macOS (for client development)
+
+**No OpenSSL installation required** - CA operations run in containers.
 
 ## Usage
 
