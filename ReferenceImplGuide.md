@@ -6158,17 +6158,13 @@ All server components deploy as Docker containers in production. The containeriz
 4. Deploy to container orchestration platform (Docker Swarm, Kubernetes, etc.)
 5. Configure load balancing and monitoring
 
-Refer to `docs/deployment-production.md` for complete production deployment guide.
-
 ### Client Distribution
 
 **macOS DMG Distribution:**
 1. Build signed application bundle
 2. Create DMG installer
 3. Notarize with Apple
-4. Distribute via download server
-
-Refer to `docs/client-distribution.md` for complete distribution guide.
+4. Distribute via download server   
 
 ---
 
