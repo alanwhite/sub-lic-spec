@@ -6172,7 +6172,7 @@ Refer to `docs/client-distribution.md` for complete distribution guide.
 
 ---
 
-## 11. Monitoring and Logging
+## 12. Monitoring and Logging
 
 ### Server Logging (Containerized)
 
