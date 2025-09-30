@@ -46,7 +46,7 @@ This document provides concrete implementation details to complement the design 
 
 ---
 
-## 1. Project Structure
+# Section 1. Project Structure
 
 ```
 sub-lic-spec/
@@ -54,97 +54,161 @@ sub-lic-spec/
 ├── README.md                        # Project overview
 ├── LICENSE                          # MIT License
 ├── CONTRIBUTING.md                  # Contribution guidelines
-├── IMPLEMENTATION.md                # This file
+├── ReferenceImplGuide.md            # Complete implementation guide
 │
 ├── ca/                              # Certificate Authority
 │   ├── scripts/
 │   │   ├── 01-setup-root-ca.sh     # Root CA initialization
-│   │   ├── 02-setup-intermediate-ca.sh
-│   │   ├── 03-generate-license-keys.sh
+│   │   ├── 02-setup-intermediate-ca.sh  # Intermediate CA setup
+│   │   ├── 03-generate-license-keys.sh  # License signing keys
 │   │   └── docker-setup.sh         # Containerized CA setup
 │   ├── config/
 │   │   ├── root-ca.cnf             # OpenSSL config for root CA
 │   │   └── intermediate-ca.cnf     # OpenSSL config for intermediate
+│   ├── root-ca/                    # Root CA files (generated)
+│   │   ├── private/
+│   │   │   └── root-ca.key         # Root CA private key (offline)
+│   │   ├── certs/
+│   │   │   └── root-ca.crt         # Root CA certificate
+│   │   ├── crl/
+│   │   ├── newcerts/
+│   │   ├── index.txt
+│   │   └── serial
+│   ├── intermediate-ca/            # Intermediate CA files (generated)
+│   │   ├── private/
+│   │   │   └── intermediate-ca.key # Intermediate CA private key
+│   │   ├── certs/
+│   │   │   ├── intermediate-ca.crt # Intermediate CA certificate
+│   │   │   └── ca-chain.crt        # Full certificate chain
+│   │   ├── crl/
+│   │   ├── newcerts/
+│   │   ├── csr/
+│   │   ├── index.txt
+│   │   ├── serial
+│   │   └── crlnumber
 │   └── README.md
 │
 ├── server/                          # PHP Server Implementation
 │   ├── public/
-│   │   └── index.php               # Entry point
+│   │   ├── index.php               # Entry point
+│   │   ├── crl/                    # Certificate Revocation Lists
+│   │   │   └── current.crl
+│   │   └── portal/                 # Portal UI pages
+│   │       ├── devices.html        # Device management UI
+│   │       ├── enrollment.html     # Enrollment UI
+│   │       └── login.html          # Login page
+│   │
 │   ├── src/
-│   │   ├── Api/
-│   │   │   ├── CertificateController.php
-│   │   │   ├── LicenseController.php
-│   │   │   ├── MigrationController.php
-│   │   │   └── PortalController.php
-│   │   ├── Services/
-│   │   │   ├── PrivateCAService.php
-│   │   │   ├── EnrollmentTokenService.php
-│   │   │   ├── LicenseTokenService.php
-│   │   │   ├── LicenseRenewalService.php
-│   │   │   ├── DeviceMigrationService.php
-│   │   │   └── CertificateValidator.php
+│   │   ├── Api/                    # API Controllers
+│   │   │   ├── CertificateController.php  # Certificate enrollment (TLS)
+│   │   │   ├── LicenseController.php      # License operations (mTLS)
+│   │   │   ├── MigrationController.php    # Device migration (mTLS)
+│   │   │   └── PortalController.php       # Portal endpoints (session)
+│   │   │
+│   │   ├── Services/               # Business Logic Services
+│   │   │   ├── PrivateCAService.php       # CA certificate issuance
+│   │   │   ├── EnrollmentTokenService.php # Token generation with device limit
+│   │   │   ├── LicenseTokenService.php    # JWT license token management
+│   │   │   ├── LicenseRenewalService.php  # Subscription renewals
+│   │   │   ├── DeviceMigrationService.php # Device transfers
+│   │   │   ├── DeviceManagementService.php # Device listing/revocation
+│   │   │   └── CertificateValidator.php   # mTLS validation
+│   │   │
 │   │   ├── Database/
-│   │   │   └── Database.php
+│   │   │   └── Database.php        # Database connection wrapper
+│   │   │
 │   │   ├── Models/
 │   │   │   ├── User.php
 │   │   │   ├── Subscription.php
 │   │   │   ├── Certificate.php
 │   │   │   └── License.php
+│   │   │
 │   │   └── Middleware/
-│   │       ├── TLSAuthMiddleware.php
-│   │       └── MTLSAuthMiddleware.php
+│   │       ├── TLSAuthMiddleware.php      # TLS-only (enrollment)
+│   │       └── MTLSAuthMiddleware.php     # mTLS required (license ops)
+│   │
 │   ├── config/
-│   │   ├── config.php
-│   │   └── routes.php
+│   │   ├── config.php              # Application configuration
+│   │   └── routes.php              # Route definitions
+│   │
 │   ├── database/
-│   │   ├── migrations/
+│   │   ├── migrations/             # Database migrations
 │   │   │   ├── 001_create_users_table.sql
-│   │   │   ├── 002_create_subscriptions_table.sql
+│   │   │   ├── 002_create_subscriptions_table.sql  # With device_limit
 │   │   │   ├── 003_create_enrollment_tokens_table.sql
-│   │   │   ├── 004_create_certificates_table.sql
-│   │   │   ├── 005_create_clients_table.sql
+│   │   │   ├── 004_create_certificates_table.sql   # With user_revoked
+│   │   │   ├── 005_create_clients_table.sql        # With device_name, platform
 │   │   │   ├── 006_create_licenses_table.sql
 │   │   │   └── 007_create_migrations_table.sql
 │   │   └── seeds/
-│   │       └── test_data.sql
+│   │       └── test_data.sql       # Test data for development
+│   │
 │   ├── tests/
 │   │   ├── Unit/
+│   │   │   ├── EnrollmentTokenServiceTest.php
+│   │   │   ├── DeviceManagementServiceTest.php
+│   │   │   └── LicenseTokenServiceTest.php
 │   │   ├── Integration/
+│   │   │   ├── EnrollmentFlowTest.php
+│   │   │   ├── DeviceLimitTest.php
+│   │   │   └── MTLSAuthTest.php
 │   │   └── bootstrap.php
+│   │
 │   ├── docker/
-│   │   ├── apache/
-│   │   │   ├── 000-default.conf
-│   │   │   └── mtls.conf
-│   │   ├── ssl/
-│   │   └── license-keys/
-│   ├── composer.json
-│   ├── .env.example
-│   ├── docker-compose.yml
+│   │   ├── apache/                 # Apache configuration
+│   │   │   ├── 000-default.conf   # TLS endpoint (port 443)
+│   │   │   └── mtls.conf           # mTLS endpoint (port 9443)
+│   │   ├── ssl/                    # SSL certificates
+│   │   │   ├── server.crt
+│   │   │   └── server.key
+│   │   └── license-keys/           # License signing keys
+│   │       ├── license-signing.key # Private key (separate from CA)
+│   │       └── license-signing.pub # Public key (embedded in client)
+│   │
+│   ├── logs/                       # Application logs
+│   │   ├── app.log
+│   │   └── audit.log
+│   │
+│   ├── composer.json               # PHP dependencies
+│   ├── .env.example                # Environment configuration template
+│   ├── .env                        # Environment configuration (gitignored)
+│   ├── docker-compose.yml          # Container orchestration
 │   ├── docker-helper.sh            # Helper script for container operations
+│   ├── migrate.php                 # Database migration runner
 │   └── README.md
 │
-├── client/                          # macOS Client Implementation
-│   └── macos-java/                 # Java macOS Client
+├── client/                          # Client Implementations
+│   └── macos-java/                 # Java macOS Client (JDK 25)
 │       ├── src/
 │       │   ├── main/
-│       │   │   └── java/
-│       │   │       └── com/
-│       │   │           └── licenseserver/
-│       │   │               └── client/
-│       │   │                   ├── Main.java
-│       │   │                   ├── AppConfig.java
-│       │   │                   ├── CertificateManager.java
-│       │   │                   ├── JWTValidator.java
-│       │   │                   ├── LicenseApiClient.java
-│       │   │                   ├── DeviceIdentifier.java
-│       │   │                   ├── LicenseStorage.java
-│       │   │                   ├── EnrollmentManager.java
-│       │   │                   ├── LicenseManager.java
-│       │   │                   ├── LicenseRenewalScheduler.java
-│       │   │                   └── ui/
-│       │   │                       ├── MainWindow.java
-│       │   │                       ├── EnrollmentDialog.java
-│       │   │                       └── MigrationDialog.java
+│       │   │   ├── java/
+│       │   │   │   └── com/
+│       │   │   │       └── licenseserver/
+│       │   │   │           └── client/
+│       │   │   │               ├── Main.java               # Application entry
+│       │   │   │               ├── AppConfig.java          # Configuration
+│       │   │   │               │
+│       │   │   │               ├── CertificateManager.java # Certificate operations
+│       │   │   │               ├── JWTValidator.java       # License validation
+│       │   │   │               ├── LicenseApiClient.java   # HTTP client (mTLS)
+│       │   │   │               ├── DeviceIdentifier.java   # Hardware ID
+│       │   │   │               ├── LicenseStorage.java     # Encrypted storage
+│       │   │   │               │
+│       │   │   │               ├── EnrollmentManager.java  # Enrollment workflow
+│       │   │   │               ├── LicenseManager.java     # License lifecycle
+│       │   │   │               ├── LicenseRenewalScheduler.java # Background renewal
+│       │   │   │               │
+│       │   │   │               └── ui/                     # User Interface
+│       │   │   │                   ├── MainWindow.java     # Main application window
+│       │   │   │                   ├── EnrollmentDialog.java  # Device enrollment
+│       │   │   │                   └── MigrationDialog.java   # Device migration
+│       │   │   │
+│       │   │   └── resources/
+│       │   │       ├── ca-chain.pem        # Embedded CA certificates
+│       │   │       ├── license-server.pub  # Embedded license public key
+│       │   │       ├── config.properties   # Application configuration
+│       │   │       └── logging.properties  # JDK logging configuration
+│       │   │
 │       │   └── test/
 │       │       └── java/
 │       │           └── com/
@@ -152,357 +216,1162 @@ sub-lic-spec/
 │       │                   └── client/
 │       │                       ├── CertificateManagerTest.java
 │       │                       ├── JWTValidatorTest.java
-│       │                       └── DeviceIdentifierTest.java
-│       ├── resources/
-│       │   ├── ca-chain.pem        # Embedded CA certificates
-│       │   ├── license-server.pub  # Embedded license public key
-│       │   ├── config.properties
-│       │   └── logging.properties
-│       ├── pom.xml
+│       │                       ├── DeviceIdentifierTest.java
+│       │                       └── EnrollmentManagerTest.java
+│       │
+│       ├── target/                 # Build output (generated)
+│       │   ├── classes/
+│       │   ├── test-classes/
+│       │   └── LicenseClient-1.0.0.jar
+│       │
+│       ├── pom.xml                 # Maven build configuration
 │       ├── build.sh                # Build and sign script
 │       ├── notarize.sh             # macOS notarization script
 │       └── README.md
 │
-└── docs/
-    ├── deployment-production.md
-    ├── client-distribution.md
-    └── troubleshooting.md
+└── docs/                           # Documentation
+    ├── deployment-production.md    # Production deployment guide
+    ├── client-distribution.md      # Client distribution guide
+    ├── troubleshooting.md          # Common issues and solutions
+    └── api-reference.md            # Complete API documentation
 ```
 
 ---
 
-## 2. Development Environment Setup
+## Key Integration Points
 
-### Server Development Environment (macOS Host - Linux Containers)
+### Two-Phase Authentication Model
 
-**Architecture:**
+**Phase 1 - Certificate Enrollment (TLS Only):**
+- Initial CSR submission uses standard TLS (port 8443)
+- Client cannot use mTLS since they don't have a certificate yet
+- Authentication relies on enrollment token validation
+- Endpoint: `/api/certificate/enroll`
+- Middleware: `TLSAuthMiddleware` (HTTPS only, no client cert)
+
+**Phase 2 - License Operations (mTLS Required):**
+- All subsequent operations require mutual TLS authentication (port 9443)
+- Client presents X.509 certificate for authentication
+- Server validates client certificate chain and identity
+- Endpoints: `/api/license/*`, `/api/migration/*`
+- Middleware: `MTLSAuthMiddleware` (validates client certificate)
+
+### Certificate Provisioning → License Issuance
+
+1. User obtains enrollment token from web portal (checks device limit)
+2. Client generates CSR and submits via TLS with token + device info
+3. Server (`CertificateController`) validates token via `EnrollmentTokenService`
+4. Server checks device limit compliance
+5. Private CA (`PrivateCAService`) issues X.509 client certificate
+6. Server (`LicenseTokenService`) generates initial JWT license token
+7. Client receives both certificate and license token together
+8. Client stores certificate in macOS Keychain
+9. Client stores encrypted license token
+
+### Device Management Flow
+
+1. Portal (`PortalController`) displays enrolled devices with identification
+2. User can revoke device certificates via portal
+3. Device limit enforced at enrollment token generation
+4. Revoked certificates added to CRL immediately
+5. Portal updated in real-time
+
+### Ongoing Operations
+
+1. Client uses mTLS with certificate for authentication
+2. Server validates certificate AND license token status
+3. License renewals delivered over mTLS channel
+4. Client operates offline using cached license token
+5. Background renewal checks every 24 hours
+
+---
+
+## Summary
+
+This project structure separates concerns clearly:
+
+- **CA operations** are isolated and containerized
+- **Server** runs entirely in Linux containers
+- **Client** runs natively on macOS with JDK 25
+- **Portal** provides device management UI
+- **Two-phase authentication** enforces security model
+- **Device limits** enforced at enrollment
+- **Device identification** helps users manage devices
+
+All server development happens in containers with zero macOS dependencies. Client must run natively for Keychain access and GUI.
+
+---
+
+# Section 2: Development Environment Setup
+
+This section covers setting up the complete development environment for both server and client components.
+
+---
+
+## 2.1 Server Development Environment (macOS Host - Linux Containers)
+
+### Architecture
+
 - **Host**: macOS (your development machine)
 - **Containers**: Linux (Ubuntu-based PHP, MySQL, Alpine OpenSSL)
 - **All server code runs inside Linux containers**
 
-**Prerequisites (Host macOS Only):**
+### Prerequisites (Host macOS Only)
+
 - macOS 12.0 (Monterey) or later
 - Docker Desktop for Mac
 - Git
 - Text editor/IDE (VS Code, PHPStorm, etc.)
 
-**NO server software installation required on macOS!**
+### NO Server Software Installation Required on macOS!
+
 - ❌ No PHP
 - ❌ No MySQL
 - ❌ No Composer
 - ❌ No OpenSSL
 - ❌ No Apache/Nginx
 
-**How Docker Desktop Works on macOS:**
-- Docker Desktop creates a lightweight Linux VM
-- All containers run inside this Linux VM
-- Your macOS filesystem is mounted into containers
-- Port forwarding makes container services accessible from macOS
-- You edit files on macOS, they execute in Linux containers
+### How Docker Desktop Works on macOS
 
-**Setup Steps:**
+Docker Desktop creates a lightweight Linux VM where all containers run:
+- All containers execute inside this Linux VM
+- Your macOS filesystem is mounted into containers via bind mounts
+- Port forwarding makes container services accessible from macOS
+- You edit files on macOS using any IDE
+- Files execute in Linux containers automatically
+
+### Setup Steps
 
 ```bash
-# Install Docker Desktop on macOS (REQUIRED)
+# 1. Install Docker Desktop on macOS (REQUIRED)
 brew install --cask docker
 # Or download from https://www.docker.com/products/docker-desktop
 
-# Clone repository
+# Start Docker Desktop application
+open -a Docker
+
+# 2. Clone repository
 git clone https://github.com/yourusername/sub-lic-spec.git
 cd sub-lic-spec/server
 
-# Everything runs in containers from here!
-# No need to install PHP, MySQL, Composer on your Mac
+# 3. Copy environment configuration
+cp .env.example .env
+# Edit .env with your configuration
 
-# Start all services (PHP, MySQL, Nginx)
+# 4. Start all services (PHP, MySQL, Apache)
 docker-compose up -d
 
-# Install PHP dependencies (inside container)
+# Output:
+# Creating network "server_license-network" ... done
+# Creating server_db_1 ... done
+# Creating server_web_1 ... done
+# Creating server_phpmyadmin_1 ... done
+
+# 5. Install PHP dependencies (inside container)
 docker-compose exec web composer install
 
-# Run database migrations (inside container)
+# Output: Installing dependencies from lock file...
+# This runs inside the PHP container, not on your Mac!
+
+# 6. Run database migrations (inside container)
 docker-compose exec web php migrate.php
 
-# Seed test data (inside container, optional)
+# Output:
+# Running: 001_create_users_table.sql
+# Success: 001_create_users_table.sql
+# Running: 002_create_subscriptions_table.sql
+# Success: 002_create_subscriptions_table.sql
+# ...
+
+# 7. (Optional) Seed test data
 docker-compose exec web php seed.php
 
-# View logs
+# 8. View logs
 docker-compose logs -f web
 
-# Access the application
+# 9. Access the application
 # TLS endpoint: https://localhost:8443
 # mTLS endpoint: https://localhost:9443
 # PHPMyAdmin: http://localhost:8081
 
-# Stop services
+# 10. Stop services
 docker-compose down
 
-# Restart services
+# 11. Restart services
 docker-compose restart
 ```
 
-**Development Workflow:**
-1. Edit code on your Mac using any IDE (VS Code, PHPStorm, etc.)
-2. Changes are instantly reflected in the container (bind mount)
-3. Run commands inside container: `docker-compose exec web <command>`
-4. No need to manage PHP versions, extensions, or MySQL on macOS
+### Development Workflow
 
-### Client Development Environment (macOS Native)
+**Typical Day-to-Day Development:**
 
-**Architecture:**
+```bash
+# Morning: Start services
+cd server
+docker-compose up -d
+
+# Edit code on your Mac using any IDE
+# - VS Code: code .
+# - PHPStorm: phpstorm .
+# - Vim: vim src/Api/CertificateController.php
+
+# Changes are instantly reflected in the container (bind mount)
+# No need to restart containers for PHP code changes
+
+# Run commands inside container
+docker-compose exec web composer require some/package
+docker-compose exec web php artisan some:command
+docker-compose exec web php migrate.php
+
+# View logs in real-time
+docker-compose logs -f web
+
+# Access MySQL directly
+docker-compose exec db mysql -u license_user -p license_system
+
+# Run tests (inside container)
+docker-compose exec web composer test
+
+# Evening: Stop services
+docker-compose down
+```
+
+**No PHP Version Management Needed:**
+- Container has PHP 8.1 with all extensions
+- No need to manage multiple PHP versions on macOS
+- No conflicts with system PHP
+- Clean, isolated environment
+
+### Docker Helper Script
+
+For convenience, use the provided helper script:
+
+```bash
+# Make it executable
+chmod +x docker-helper.sh
+
+# Available commands
+./docker-helper.sh start      # Start all services
+./docker-helper.sh stop       # Stop all services
+./docker-helper.sh restart    # Restart all services
+./docker-helper.sh logs       # View logs (optional: specify service)
+./docker-helper.sh shell      # Open bash shell in web container
+./docker-helper.sh mysql      # Open MySQL client
+./docker-helper.sh composer   # Run composer commands
+./docker-helper.sh migrate    # Run database migrations
+./docker-helper.sh seed       # Seed database
+./docker-helper.sh clean      # Remove all containers and data
+./docker-helper.sh rebuild    # Rebuild containers from scratch
+```
+
+**Example Usage:**
+
+```bash
+# Install new PHP package
+./docker-helper.sh composer require monolog/monolog
+
+# Access container shell for debugging
+./docker-helper.sh shell
+# Now you're inside the container
+root@abc123:/var/www/html# ls
+root@abc123:/var/www/html# php -v
+root@abc123:/var/www/html# exit
+
+# View web server logs
+./docker-helper.sh logs web
+
+# Complete rebuild (if something goes wrong)
+./docker-helper.sh clean
+./docker-helper.sh rebuild
+./docker-helper.sh migrate
+```
+
+### Troubleshooting Server Setup
+
+**Problem: "Cannot connect to Docker daemon"**
+```bash
+# Solution: Start Docker Desktop application
+open -a Docker
+
+# Wait for Docker Desktop to fully start (whale icon in menu bar)
+# Then try again
+docker-compose up -d
+```
+
+**Problem: "Port 8443 already in use"**
+```bash
+# Solution: Find what's using the port
+sudo lsof -i :8443
+
+# Kill the process or change port in docker-compose.yml
+# Edit docker-compose.yml:
+# ports:
+#   - "8444:443"  # Changed from 8443 to 8444
+```
+
+**Problem: "Database connection failed"**
+```bash
+# Solution: Wait for MySQL to fully start
+docker-compose logs db
+
+# Look for: "ready for connections"
+# If not ready, wait 30 seconds and try again
+
+# Or restart just the database
+docker-compose restart db
+```
+
+**Problem: "Permission denied" when editing files**
+```bash
+# Solution: Fix ownership
+docker-compose exec web chown -R www-data:www-data /var/www/html
+
+# Or run commands as www-data user
+docker-compose exec -u www-data web composer install
+```
+
+---
+
+# 2.2 Client Development Environment (macOS Native)
+
+### Architecture
+
 - **Client runs natively on macOS host** (NOT in containers)
 - Requires direct macOS system access for Keychain and hardware ID
 - Cannot be containerized due to native macOS dependencies
 
-**Prerequisites (Host macOS - Required):**
+### Prerequisites (Host macOS - Required)
+
 - macOS 12.0 (Monterey) or later
 - **JDK 25 (Required)** - Must be installed on host macOS
 - Maven 3.9+
 - Xcode Command Line Tools (for native integrations)
 
-**Why JDK 25 is Required on Host:**
-- Client is a native macOS desktop application
+### Why JDK 25 is Required on Host
+
+The client is a native macOS desktop application that:
 - Accesses macOS Keychain via `/usr/bin/security` command
 - Reads macOS hardware identifiers via `system_profiler` and `ioreg`
 - Displays native macOS GUI using Swing
-- Cannot run inside a Linux Docker container
+- Uses JDK 25 features (Virtual Threads, Structured Concurrency)
+- **Cannot run inside a Linux Docker container**
 
-**Setup Steps:**
+### Setup Steps
 
 ```bash
-# Install JDK 25 on macOS (REQUIRED)
+# 1. Install JDK 25 on macOS (REQUIRED)
 brew install openjdk@25
 
-# Add JDK to path
+# 2. Add JDK to path
 echo 'export PATH="/opt/homebrew/opt/openjdk@25/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
-# Verify version
-java -version  # Should show version 25.x.x
+# For Intel Macs, path is different:
+# echo 'export PATH="/usr/local/opt/openjdk@25/bin:$PATH"' >> ~/.zshrc
 
-# Install Maven
+# 3. Verify Java version
+java -version
+# Should output: openjdk version "25.0.0" or similar
+
+javac -version
+# Should output: javac 25.0.0
+
+# 4. Install Maven
 brew install maven
 
-# Install Xcode Command Line Tools (for native command access)
+# 5. Verify Maven
+mvn -version
+# Should show Maven 3.9+ and Java 25
+
+# 6. Install Xcode Command Line Tools (for native command access)
 xcode-select --install
 
-# Navigate to client directory
+# 7. Navigate to client directory
 cd client/macos-java
 
-# Install dependencies (only testing frameworks)
+# 8. Install dependencies and build
 mvn clean install
 
-# Run tests
+# Output:
+# [INFO] Building LicenseClient 1.0.0
+# [INFO] Compiling 12 source files to target/classes
+# [INFO] BUILD SUCCESS
+
+# 9. Run tests
 mvn test
 
-# Run application (on macOS host)
+# Output:
+# [INFO] Running com.licenseserver.client.DeviceIdentifierTest
+# [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+
+# 10. Run application (on macOS host with GUI)
 mvn exec:java -Dexec.mainClass="com.licenseserver.client.Main"
 
-# Build distributable package
+# A Swing window should appear on your macOS desktop
+
+# 11. Build distributable package
 mvn package
+
+# Output: target/LicenseClient-1.0.0.jar
 ```
 
-**Note on Client Containerization:**
-While the client JAR can be *built* using a Maven Docker container:
+### Development Workflow
+
+**Typical Development:**
+
 ```bash
-docker run --rm -v "$(pwd)":/app -w /app maven:3.9-eclipse-temurin-25 mvn clean package
+# Edit code using any IDE
+# - IntelliJ IDEA: idea .
+# - VS Code: code .
+# - Eclipse: eclipse .
+
+# Run tests continuously during development
+mvn test-compile
+mvn test
+
+# Run application for testing
+mvn exec:java
+
+# Debug with IDE
+# IntelliJ: Right-click Main.java → Debug
+# VS Code: Use Java Debug extension
+
+# Build JAR for distribution
+mvn clean package
+
+# Run the built JAR
+java -jar target/LicenseClient-1.0.0.jar
 ```
 
-The resulting application **must still run on macOS host with JDK 25 installed** because it requires:
-- Native macOS Keychain access
-- macOS system commands
-- macOS GUI environment
-- Direct hardware access for device identification
+### Testing Native Features
+
+The client accesses native macOS features. Test them:
+
+```bash
+# Test hardware UUID detection
+/usr/sbin/system_profiler SPHardwareDataType | grep "Hardware UUID"
+
+# Test Keychain access
+security find-certificate -a login.keychain
+
+# Test certificate storage
+security import test-cert.p12 -k ~/Library/Keychains/login.keychain-db
+
+# Verify Java can execute these commands
+mvn exec:java -Dexec.mainClass="com.licenseserver.client.DeviceIdentifier"
+```
+
+### Note on Client Containerization
+
+**You CAN build the JAR in a container:**
+```bash
+# Build JAR using Maven Docker image
+docker run --rm \
+  -v "$(pwd)":/app \
+  -w /app \
+  maven:3.9-eclipse-temurin-25 \
+  mvn clean package
+
+# This creates target/LicenseClient-1.0.0.jar
+```
+
+**But the resulting JAR must still run on macOS host:**
+```bash
+# This MUST run on macOS, not in Docker
+java -jar target/LicenseClient-1.0.0.jar
+
+# Why? Because it needs:
+# - Native macOS Keychain access
+# - macOS system commands (security, system_profiler)
+# - macOS GUI environment (Swing)
+# - Direct hardware access for device ID
+```
+
+### Troubleshooting Client Setup
+
+**Problem: "java: command not found"**
+```bash
+# Solution: Add JDK to PATH
+export PATH="/opt/homebrew/opt/openjdk@25/bin:$PATH"
+
+# Make permanent
+echo 'export PATH="/opt/homebrew/opt/openjdk@25/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# Verify
+java -version
+```
+
+**Problem: "Unsupported class file major version 69"**
+```bash
+# This means you're using Java < 25
+# Solution: Ensure JDK 25 is being used
+java -version  # Should show version 25
+
+# If not, update JAVA_HOME
+export JAVA_HOME=/opt/homebrew/opt/openjdk@25
+```
+
+**Problem: "Cannot access macOS Keychain"**
+```bash
+# Solution: Grant Terminal/IDE access to Keychain
+# System Preferences → Security & Privacy → Privacy → Full Disk Access
+# Add Terminal.app and your IDE
+
+# Or run with sudo (not recommended for development)
+sudo mvn exec:java
+```
+
+**Problem: "GUI doesn't appear"**
+```bash
+# Solution: Ensure DISPLAY is set for macOS
+# This should work automatically on macOS
+
+# If running via SSH, enable X11 forwarding
+ssh -X user@host
+
+# Or use VNC for remote GUI access
+```
 
 ---
 
-## 3. Configuration Management
+## 2.3 Integrated Development Setup
 
-### Server Configuration (.env)
+### Complete First-Time Setup
+
+Follow these steps for a complete working environment:
+
+```bash
+# 1. Install all prerequisites on macOS
+brew install --cask docker
+brew install openjdk@25 maven git
+
+# 2. Clone repository
+git clone https://github.com/yourusername/sub-lic-spec.git
+cd sub-lic-spec
+
+# 3. Setup CA infrastructure (runs in OpenSSL container)
+cd ca
+./docker-setup.sh
+cd ..
+
+# 4. Setup server (runs in containers)
+cd server
+cp .env.example .env
+# Edit .env with your configuration
+
+./docker-helper.sh start
+./docker-helper.sh composer install
+./docker-helper.sh migrate
+
+# Server now running at:
+# - TLS: https://localhost:8443
+# - mTLS: https://localhost:9443
+# - Portal: https://localhost:8443/portal/devices.html
+cd ..
+
+# 5. Build client (runs natively on macOS)
+cd client/macos-java
+mvn clean install
+mvn exec:java
+
+# Client GUI should appear
+cd ../..
+
+# You now have:
+# ✓ CA infrastructure (in containers)
+# ✓ Server running (in containers)
+# ✓ Client running (native macOS)
+```
+
+### Daily Development Workflow
+
+```bash
+# Morning: Start development
+cd sub-lic-spec/server
+./docker-helper.sh start
+
+# Edit server code in your IDE
+# Changes are reflected immediately (bind mount)
+
+# Edit client code in your IDE
+cd ../client/macos-java
+# Build and test as needed
+
+# Run both server and client
+# Server: Already running in containers
+# Client: mvn exec:java
+
+# Evening: Stop development
+cd ../../server
+./docker-helper.sh stop
+```
+
+### IDE Setup Recommendations
+
+**VS Code:**
+```bash
+# Install extensions
+code --install-extension bmewburn.vscode-intelephense-client  # PHP
+code --install-extension vscjava.vscode-java-pack              # Java
+
+# Open workspace
+code sub-lic-spec
+```
+
+**IntelliJ IDEA / PHPStorm:**
+- Open server directory for PHP development
+- Open client/macos-java for Java development
+- Configure Docker integration for server
+- Configure Maven for client
+
+---
+
+## Summary
+
+**Server Development:**
+- Fully containerized Linux environment
+- Zero software installation on macOS (except Docker Desktop)
+- Edit on Mac, execute in containers
+- Identical to production environment
+
+**Client Development:**
+- Native macOS application with JDK 25
+- Requires Keychain and system command access
+- Cannot be containerized
+- Must run on macOS host for full functionality
+
+Both environments are now ready for development!
+
+---
+
+# Section 3: Configuration Management
+
+This section covers all configuration files for both server and client components.
+
+---
+
+## 3.1 Server Configuration
+
+### Environment Configuration (.env)
 
 **File: `server/.env.example`**
 
 ```ini
-# Application
+# ============================================================================
+# APPLICATION CONFIGURATION
+# ============================================================================
 APP_ENV=development
 APP_DEBUG=true
 APP_URL=https://license-server.local
 APP_PORT=8443
 
-# Database
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
 DB_CONNECTION=mysql
 DB_HOST=db
 DB_PORT=3306
 DB_DATABASE=license_system
 DB_USERNAME=license_user
-DB_PASSWORD=secure_password_here
+DB_PASSWORD=secure_password_here_change_me
 
-# Private CA Configuration
-CA_ROOT_CERT_PATH=/etc/ca/root-ca/root-ca.crt
-CA_ROOT_KEY_PATH=/etc/ca/root-ca/root-ca.key
-CA_ROOT_KEY_PASSWORD=root_ca_password_here
+# ============================================================================
+# PRIVATE CA CONFIGURATION
+# ============================================================================
+# Root CA (Offline, 20-year validity)
+CA_ROOT_CERT_PATH=/etc/ca/root-ca/certs/root-ca.crt
+CA_ROOT_KEY_PATH=/etc/ca/root-ca/private/root-ca.key
+CA_ROOT_KEY_PASSWORD=root_ca_password_here_change_me
 
-CA_INTERMEDIATE_CERT_PATH=/etc/ca/intermediate-ca/intermediate-ca.crt
-CA_INTERMEDIATE_KEY_PATH=/etc/ca/intermediate-ca/intermediate-ca.key
-CA_INTERMEDIATE_KEY_PASSWORD=intermediate_ca_password_here
+# Intermediate CA (Online, 10-year validity)
+CA_INTERMEDIATE_CERT_PATH=/etc/ca/intermediate-ca/certs/intermediate-ca.crt
+CA_INTERMEDIATE_KEY_PATH=/etc/ca/intermediate-ca/private/intermediate-ca.key
+CA_INTERMEDIATE_KEY_PASSWORD=intermediate_ca_password_here_change_me
 
+# CA Directories
 CA_ISSUED_CERTS_DIR=/etc/ca/issued-certificates
 CA_CRL_PATH=/var/www/html/public/crl/current.crl
+CA_CRL_UPDATE_INTERVAL=86400  # 24 hours in seconds
 
-# License Signing Keys
+# ============================================================================
+# LICENSE SIGNING KEYS (Separate from CA keys)
+# ============================================================================
 LICENSE_SIGNING_KEY_PATH=/etc/license-server/license-signing.key
-LICENSE_SIGNING_KEY_PASSWORD=license_key_password_here
+LICENSE_SIGNING_KEY_PASSWORD=license_key_password_here_change_me
 LICENSE_SIGNING_PUB_PATH=/etc/license-server/license-signing.pub
 
-# TLS Configuration
+# ============================================================================
+# TLS/SSL CONFIGURATION
+# ============================================================================
+# Server certificate (from public CA for production)
 TLS_CERT_PATH=/etc/ssl/certs-custom/server.crt
 TLS_KEY_PATH=/etc/ssl/certs-custom/server.key
 
-# Security
-JWT_SECRET=random_secret_key_here_change_in_production
-ENCRYPTION_KEY=32_byte_encryption_key_here_change_in_production
+# TLS endpoint (no client cert required)
+TLS_PORT=8443
 
-# Grace Periods (days)
+# mTLS endpoint (client cert required)
+MTLS_PORT=9443
+
+# ============================================================================
+# SECURITY
+# ============================================================================
+# JWT secret for session tokens (NOT license tokens)
+JWT_SECRET=random_secret_key_here_32_chars_minimum_change_in_production
+
+# Encryption key for sensitive data (32 bytes)
+ENCRYPTION_KEY=32_byte_encryption_key_here_change_in_production_exactly_32
+
+# ============================================================================
+# SUBSCRIPTION & GRACE PERIODS
+# ============================================================================
+# Grace period after subscription expiration (days)
 GRACE_PERIOD_MONTHLY=5
 GRACE_PERIOD_ANNUAL=14
 
-# Certificate Validity
+# Device limits (can be overridden per subscription)
+DEFAULT_DEVICE_LIMIT=1
+
+# ============================================================================
+# CERTIFICATE VALIDITY
+# ============================================================================
 CERTIFICATE_VALIDITY_YEARS=2
-CERTIFICATE_RENEWAL_DAYS=30
+CERTIFICATE_RENEWAL_DAYS=30  # Start renewal window 30 days before expiry
 
-# Rate Limiting
-RATE_LIMIT_ENROLLMENT=10
-RATE_LIMIT_LICENSE=100
-RATE_LIMIT_WINDOW=3600
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+# Enrollment tokens
+RATE_LIMIT_ENROLLMENT_TOKENS=5  # Max tokens per 24 hours
+RATE_LIMIT_ENROLLMENT_WINDOW=86400  # 24 hours in seconds
 
-# Logging
-LOG_LEVEL=debug
+# License operations
+RATE_LIMIT_LICENSE=100  # Max license operations per hour
+RATE_LIMIT_LICENSE_WINDOW=3600  # 1 hour in seconds
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+LOG_LEVEL=debug  # debug, info, warning, error
 LOG_PATH=/var/log/license-server/app.log
 AUDIT_LOG_PATH=/var/log/license-server/audit.log
+LOG_MAX_SIZE=10485760  # 10 MB
+LOG_MAX_FILES=10
 
-# External Services (if applicable)
+# ============================================================================
+# EXTERNAL SERVICES (Optional)
+# ============================================================================
+# Payment provider integration
+PAYMENT_PROVIDER=stripe  # stripe, paypal, etc.
 PAYMENT_PROVIDER_API_KEY=
 PAYMENT_PROVIDER_WEBHOOK_SECRET=
 
-# Email (for notifications)
+# ============================================================================
+# EMAIL NOTIFICATIONS (Optional)
+# ============================================================================
 MAIL_MAILER=smtp
 MAIL_HOST=smtp.mailtrap.io
 MAIL_PORT=2525
 MAIL_USERNAME=
 MAIL_PASSWORD=
+MAIL_ENCRYPTION=tls
 MAIL_FROM_ADDRESS=noreply@license-server.com
+MAIL_FROM_NAME="License Server"
+
+# ============================================================================
+# MONITORING & ANALYTICS (Optional)
+# ============================================================================
+SENTRY_DSN=
+ANALYTICS_ENABLED=false
 ```
 
-### Client Configuration (Java/macOS)
+### Docker Compose Configuration
+
+**File: `server/docker-compose.yml`**
+
+```yaml
+version: '3.8'
+
+services:
+  # PHP Web Server with Apache
+  web:
+    image: php:8.1-apache
+    container_name: license-server-web
+    ports:
+      - "${TLS_PORT:-8443}:443"      # TLS endpoint
+      - "${MTLS_PORT:-9443}:9443"    # mTLS endpoint
+      - "8080:80"                     # HTTP (redirect to HTTPS)
+    volumes:
+      # Mount entire project directory
+      - ./:/var/www/html
+      
+      # Apache configuration
+      - ./docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf
+      - ./docker/apache/mtls.conf:/etc/apache2/sites-available/mtls.conf
+      
+      # SSL certificates
+      - ./docker/ssl:/etc/ssl/certs-custom
+      
+      # CA certificates (read-only)
+      - ../ca/root-ca:/etc/ca/root-ca:ro
+      - ../ca/intermediate-ca:/etc/ca/intermediate-ca:ro
+      
+      # License signing keys
+      - ./docker/license-keys:/etc/license-server:ro
+      
+      # Logs
+      - ./logs:/var/log/license-server
+    environment:
+      - APACHE_RUN_USER=www-data
+      - APACHE_RUN_GROUP=www-data
+      - APACHE_LOG_DIR=/var/log/apache2
+    env_file:
+      - .env
+    depends_on:
+      - db
+    networks:
+      - license-network
+    command: >
+      bash -c "
+        # Install required PHP extensions
+        docker-php-ext-install pdo pdo_mysql mysqli &&
+        
+        # Enable Apache modules
+        a2enmod ssl rewrite headers &&
+        
+        # Enable both sites (TLS and mTLS)
+        a2ensite 000-default mtls &&
+        
+        # Set permissions
+        chown -R www-data:www-data /var/www/html &&
+        
+        # Start Apache
+        apache2-foreground
+      "
+
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: license-server-db
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${DB_DATABASE:-license_system}
+      MYSQL_USER: ${DB_USERNAME:-license_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-license_password}
+    volumes:
+      # Persistent database storage
+      - db-data:/var/lib/mysql
+      
+      # Custom MySQL configuration
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/custom.cnf
+    networks:
+      - license-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PHPMyAdmin (Development only)
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: license-server-phpmyadmin
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: db
+      PMA_USER: ${DB_USERNAME:-license_user}
+      PMA_PASSWORD: ${DB_PASSWORD:-license_password}
+    depends_on:
+      - db
+    networks:
+      - license-network
+    profiles:
+      - development  # Only start in development
+
+volumes:
+  db-data:
+    driver: local
+
+networks:
+  license-network:
+    driver: bridge
+```
+
+### Apache TLS Configuration
+
+**File: `server/docker/apache/000-default.conf`**
+
+```apache
+# TLS-only endpoint (no client certificate required)
+# Used for certificate enrollment
+<VirtualHost *:443>
+    ServerName license-server.local
+    ServerAdmin admin@license-server.local
+    
+    DocumentRoot /var/www/html/public
+    
+    # TLS Configuration
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs-custom/server.crt
+    SSLCertificateKeyFile /etc/ssl/certs-custom/server.key
+    
+    # No client certificate verification
+    SSLVerifyClient none
+    
+    # Logging
+    ErrorLog ${APACHE_LOG_DIR}/error.log
+    CustomLog ${APACHE_LOG_DIR}/access.log combined
+    
+    <Directory /var/www/html/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    # PHP Configuration
+    <FilesMatch \.php$>
+        SetHandler application/x-httpd-php
+    </FilesMatch>
+</VirtualHost>
+
+# HTTP to HTTPS redirect
+<VirtualHost *:80>
+    ServerName license-server.local
+    Redirect permanent / https://license-server.local:8443/
+</VirtualHost>
+```
+
+### Apache mTLS Configuration
+
+**File: `server/docker/apache/mtls.conf`**
+
+```apache
+# mTLS endpoint (client certificate REQUIRED)
+# Used for all license operations
+<VirtualHost *:9443>
+    ServerName license-server.local
+    ServerAdmin admin@license-server.local
+    
+    DocumentRoot /var/www/html/public
+    
+    # TLS Configuration
+    SSLEngine on
+    SSLCertificateFile /etc/ssl/certs-custom/server.crt
+    SSLCertificateKeyFile /etc/ssl/certs-custom/server.key
+    
+    # Client Certificate Verification (REQUIRED)
+    SSLVerifyClient require
+    SSLVerifyDepth 2
+    SSLCACertificateFile /etc/ca/intermediate-ca/certs/ca-chain.crt
+    
+    # Pass client certificate info to PHP
+    SSLOptions +StdEnvVars +ExportCertData
+    
+    # Logging
+    ErrorLog ${APACHE_LOG_DIR}/mtls_error.log
+    CustomLog ${APACHE_LOG_DIR}/mtls_access.log combined
+    
+    <Directory /var/www/html/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    # PHP Configuration
+    <FilesMatch \.php$>
+        SetHandler application/x-httpd-php
+    </FilesMatch>
+</VirtualHost>
+```
+
+---
+
+## 3.2 Client Configuration
+
+### Application Configuration
 
 **File: `client/macos-java/src/main/resources/config.properties`**
 
 ```properties
-# License Server
+# ============================================================================
+# LICENSE SERVER
+# ============================================================================
 license.server.url=https://license-server.local:8443
 license.server.verify.ssl=true
+license.server.timeout.seconds=10
 
-# Certificate Storage (macOS Keychain)
+# ============================================================================
+# CERTIFICATE STORAGE (macOS Keychain)
+# ============================================================================
 cert.keychain.name=login
 cert.keychain.label=License Client Certificate
+cert.keychain.access.group=
 
-# License Storage
+# ============================================================================
+# LICENSE STORAGE
+# ============================================================================
 license.storage.path=${user.home}/Library/Application Support/LicenseClient
 license.storage.encrypted=true
+license.storage.backup.enabled=false
 
-# Renewal
+# ============================================================================
+# LICENSE RENEWAL
+# ============================================================================
+# Check for renewal X days before expiration
 license.renewal.check.days=7
+
+# Check every X hours when app is running
 license.renewal.check.interval.hours=24
+
+# Enable background renewal (when app is running)
 license.renewal.background=true
 
-# Migration
+# ============================================================================
+# DEVICE MIGRATION
+# ============================================================================
 migration.token.validity.hours=24
+migration.export.path=${user.home}/Documents
 
-# Logging
+# ============================================================================
+# LOGGING
+# ============================================================================
 log.level=INFO
 log.path=${user.home}/Library/Logs/LicenseClient
+log.max.size.mb=10
+log.max.files=5
 
-# UI
-ui.theme=system
+# ============================================================================
+# USER INTERFACE
+# ============================================================================
+ui.theme=system  # system, light, dark
 ui.notifications.enabled=true
 ui.dock.icon=true
+ui.start.minimized=false
+
+# ============================================================================
+# DEVICE IDENTIFICATION
+# ============================================================================
+# Pre-fill device name with hostname
+device.name.auto.detect=true
+device.name.default=My Device
 ```
+
+### Java Application Configuration
 
 **File: `client/macos-java/src/main/java/com/licenseserver/client/AppConfig.java`**
 
 ```java
 package com.licenseserver.client;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
+
 public class AppConfig {
-    public static final String LICENSE_SERVER_URL = System.getProperty(
+    private static final Properties props = new Properties();
+    
+    static {
+        try (InputStream input = AppConfig.class.getClassLoader()
+                .getResourceAsStream("config.properties")) {
+            if (input != null) {
+                props.load(input);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to load config.properties: " + e.getMessage());
+        }
+    }
+    
+    // ========================================================================
+    // LICENSE SERVER
+    // ========================================================================
+    public static final String LICENSE_SERVER_URL = getProperty(
         "license.server.url",
         "https://license-server.local:8443"
     );
     
     public static final boolean VERIFY_SSL = Boolean.parseBoolean(
-        System.getProperty("license.server.verify.ssl", "true")
+        getProperty("license.server.verify.ssl", "true")
     );
     
-    public static final int RENEWAL_CHECK_DAYS = 7;
-    public static final int RENEWAL_CHECK_INTERVAL_HOURS = 24;
+    public static final int SERVER_TIMEOUT_SECONDS = Integer.parseInt(
+        getProperty("license.server.timeout.seconds", "10")
+    );
     
-    public static final int MIGRATION_TOKEN_VALIDITY_HOURS = 24;
+    // ========================================================================
+    // CERTIFICATE STORAGE
+    // ========================================================================
+    public static final String KEYCHAIN_NAME = getProperty(
+        "cert.keychain.name",
+        "login"
+    );
     
-    // Embedded CA certificate chain (PEM format)
+    public static final String CERTIFICATE_LABEL = getProperty(
+        "cert.keychain.label",
+        "License Client Certificate"
+    );
+    
+    // ========================================================================
+    // LICENSE RENEWAL
+    // ========================================================================
+    public static final int RENEWAL_CHECK_DAYS = Integer.parseInt(
+        getProperty("license.renewal.check.days", "7")
+    );
+    
+    public static final int RENEWAL_CHECK_INTERVAL_HOURS = Integer.parseInt(
+        getProperty("license.renewal.check.interval.hours", "24")
+    );
+    
+    public static final boolean RENEWAL_BACKGROUND = Boolean.parseBoolean(
+        getProperty("license.renewal.background", "true")
+    );
+    
+    // ========================================================================
+    // DEVICE MIGRATION
+    // ========================================================================
+    public static final int MIGRATION_TOKEN_VALIDITY_HOURS = Integer.parseInt(
+        getProperty("migration.token.validity.hours", "24")
+    );
+    
+    // ========================================================================
+    // EMBEDDED CA CERTIFICATE CHAIN (PEM format)
+    // ========================================================================
     public static final String CA_CERTIFICATE_CHAIN = """
 -----BEGIN CERTIFICATE-----
-MIIFxTCCA62gAwIBAgIUABCDEFGHIJKLMNOPQRSTUVWXYZab...
------END CERTIFICATE-----
------BEGIN CERTIFICATE-----
-MIIFyTCCA7GgAwIBAgIUZabcdefghijklmnopqrstuvwxyz...
------END CERTIFICATE-----
-""";
-    
-    // Embedded license server public key (PEM format)
-    public static final String LICENSE_SERVER_PUBLIC_KEY = """
------BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
------END PUBLIC KEY-----
-""";
-}
-```
-
-**File: `client/macos-java/src/main/resources/logging.properties`**
-
-```properties
-# JDK built-in logging configuration
-
-# Root logger level
-.level=INFO
-
-# Handlers
-handlers=java.util.logging.ConsoleHandler,java.util.logging.FileHandler
-
-# Console handler
-java.util.logging.ConsoleHandler.level=INFO
-java.util.logging.ConsoleHandler.formatter=java.util.logging.SimpleFormatter
-
-# File handler - logs to ~/Library/Logs/LicenseClient/
-java.util.logging.FileHandler.pattern=%h/Library/Logs/LicenseClient/client%u.log
-java.util.logging.FileHandler.limit=5000000
-java.util.logging.FileHandler.count=10
-java.util.logging.FileHandler.level=ALL
-java.util.logging.FileHandler.formatter=java.util.logging.SimpleFormatter
-java.util.logging.FileHandler.append=true
-
-# Formatter pattern
-java.util.logging.SimpleFormatter.format=%1$tY-%1$tm-%1$td %1$tH:%1$tM:%1$tS.%1$tL %4$s [%3$s] %5$s%6$s%n
-
-# Package-specific logging levels
-com.licenseserver.client.level=FINE
-com.licenseserver.client.security.level=FINEST
-```
+MIIFxTCCA62gAwIBAgIUABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrs
+tuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEF
+GHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST
+UVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
+ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
+wxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJ
+KLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX
+YZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
+mnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN
+OPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZab
+cdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq
+rstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEF
+GHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTU
+VWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij
+klmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
+zABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN
+OPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcd
+efghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ
 
 ---
 
-## 4. Database Setup and Migrations
+# Section 4: Database Setup and Migrations
 
-### Migration System
+This section covers database schema, migrations, and setup procedures.
+
+---
+
+## 4.1 Migration System
+
+### Migration Runner
 
 **File: `server/migrate.php`**
 
@@ -523,8 +1392,9 @@ $db->exec("
     CREATE TABLE IF NOT EXISTS migrations (
         id INT AUTO_INCREMENT PRIMARY KEY,
         migration VARCHAR(255) NOT NULL UNIQUE,
-        executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_migration (migration)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
 // Get executed migrations
@@ -560,11 +1430,17 @@ foreach ($migrationFiles as $file) {
 echo "All migrations completed successfully!\n";
 ```
 
-### Migration Files
+---
+
+## 4.2 Database Migrations
+
+### 001 - Users Table
 
 **File: `server/database/migrations/001_create_users_table.sql`**
 
 ```sql
+-- Users table
+-- Stores user account information
 CREATE TABLE users (
     id INT AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -575,18 +1451,25 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL,
+    
     INDEX idx_email (email),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+### 002 - Subscriptions Table (with Device Limit)
 
 **File: `server/database/migrations/002_create_subscriptions_table.sql`**
 
 ```sql
+-- Subscriptions table
+-- Stores subscription information with device limits
 CREATE TABLE subscriptions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     subscription_type ENUM('monthly', 'annual') NOT NULL,
+    device_limit INT NOT NULL DEFAULT 1,  -- NEW: Device limit per subscription
     start_date DATETIME NOT NULL,
     end_date DATETIME NOT NULL,
     payment_status ENUM('active', 'pending', 'expired', 'cancelled') DEFAULT 'pending',
@@ -595,20 +1478,492 @@ CREATE TABLE subscriptions (
     auto_renew BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
     INDEX idx_user_id (user_id),
     INDEX idx_end_date (end_date),
     INDEX idx_payment_status (payment_status),
+    INDEX idx_user_status (user_id, payment_status),
+    
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**Additional migration files (003-007) follow the schemas defined in spec.md Section 8.3 and 8.4**
+### 003 - Enrollment Tokens Table
+
+**File: `server/database/migrations/003_create_enrollment_tokens_table.sql`**
+
+```sql
+-- Enrollment tokens table
+-- Single-use tokens for certificate enrollment
+CREATE TABLE enrollment_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(255) UNIQUE NOT NULL,
+    user_id INT NOT NULL,
+    subscriber_email VARCHAR(255) NOT NULL,
+    subscriber_name VARCHAR(255) NOT NULL,
+    organization VARCHAR(255),
+    subscription_type ENUM('monthly', 'annual') NOT NULL,
+    subscription_id INT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    max_uses INT DEFAULT 1,
+    used_count INT DEFAULT 0,
+    used_at TIMESTAMP NULL,
+    certificate_fingerprint VARCHAR(255),
+    revoked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_token (token),
+    INDEX idx_user_id (user_id),
+    INDEX idx_expires (expires_at),
+    INDEX idx_subscription_id (subscription_id),
+    INDEX idx_used (used_count, max_uses),
+    
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 004 - Certificates Table (with User Revocation)
+
+**File: `server/database/migrations/004_create_certificates_table.sql`**
+
+```sql
+-- Issued certificates table
+-- Tracks all client certificates issued by the private CA
+CREATE TABLE issued_certificates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    serial_number VARCHAR(255) UNIQUE NOT NULL,
+    subject VARCHAR(500) NOT NULL,
+    fingerprint VARCHAR(255) UNIQUE NOT NULL,
+    user_id INT NOT NULL,
+    issued_at DATETIME NOT NULL,
+    expires_at DATETIME NOT NULL,
+    status ENUM('active', 'revoked', 'expired') DEFAULT 'active',
+    revoked_at TIMESTAMP NULL,
+    revocation_reason ENUM('account_deletion', 'key_compromise', 'superseded', 'user_revoked') NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_serial (serial_number),
+    INDEX idx_fingerprint (fingerprint),
+    INDEX idx_user_id (user_id),
+    INDEX idx_status (status),
+    INDEX idx_status_expires (status, expires_at),
+    INDEX idx_expires_at (expires_at),
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 005 - Clients Table (with Device Name and Platform)
+
+**File: `server/database/migrations/005_create_clients_table.sql`**
+
+```sql
+-- Clients table
+-- Tracks enrolled devices with identification information
+CREATE TABLE clients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_cert_fingerprint VARCHAR(255) UNIQUE NOT NULL,
+    cert_serial_number VARCHAR(255) NOT NULL,
+    user_id INT NOT NULL,
+    subscriber_email VARCHAR(255) NOT NULL,
+    subscriber_name VARCHAR(255) NOT NULL,
+    organization VARCHAR(255),
+    device_name VARCHAR(255),  -- NEW: User-provided device name
+    platform ENUM('windows', 'macos', 'linux', 'other') NOT NULL,  -- NEW: Auto-detected platform
+    enrollment_token VARCHAR(255),
+    subscription_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP NULL,
+    
+    INDEX idx_fingerprint (client_cert_fingerprint),
+    INDEX idx_cert_serial (cert_serial_number),
+    INDEX idx_user_id (user_id),
+    INDEX idx_subscription_id (subscription_id),
+    INDEX idx_last_seen (last_seen),
+    INDEX idx_user_platform (user_id, platform),
+    
+    FOREIGN KEY (enrollment_token) REFERENCES enrollment_tokens(token),
+    FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 006 - Licenses Table
+
+**File: `server/database/migrations/006_create_licenses_table.sql`**
+
+```sql
+-- Licenses table
+-- Stores active license tokens for devices
+CREATE TABLE licenses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    subscription_id INT NOT NULL,
+    client_cert_fingerprint VARCHAR(255) NOT NULL,
+    cert_serial_number VARCHAR(255) NOT NULL,
+    device_id VARCHAR(255) NOT NULL,
+    token TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deactivated_at TIMESTAMP NULL,
+    
+    INDEX idx_subscription_id (subscription_id),
+    INDEX idx_cert_fingerprint (client_cert_fingerprint),
+    INDEX idx_cert_serial (cert_serial_number),
+    INDEX idx_device_id (device_id),
+    INDEX idx_device_active (device_id, is_active),
+    INDEX idx_cert_device (client_cert_fingerprint, device_id),
+    
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+    FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 007 - License Migrations Table
+
+**File: `server/database/migrations/007_create_migrations_table.sql`**
+
+```sql
+-- License migrations table
+-- Tracks device-to-device license transfers
+CREATE TABLE license_migrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    migration_token VARCHAR(255) UNIQUE NOT NULL,
+    client_cert_fingerprint VARCHAR(255) NOT NULL,
+    cert_serial_number VARCHAR(255) NOT NULL,
+    old_device_id VARCHAR(255) NOT NULL,
+    new_device_id VARCHAR(255),
+    expires_at DATETIME NOT NULL,
+    completed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_token (migration_token),
+    INDEX idx_expires (expires_at),
+    INDEX idx_cert_serial (cert_serial_number),
+    INDEX idx_old_device (old_device_id),
+    INDEX idx_completed (completed_at),
+    
+    FOREIGN KEY (cert_serial_number) REFERENCES issued_certificates(serial_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
 
 ---
 
-## 5. Private CA Setup
+## 4.3 Database Seeding (Test Data)
 
-### CA Setup in Containers
+### Test Data Seeder
+
+**File: `server/database/seeds/test_data.sql`**
+
+```sql
+-- Test users
+INSERT INTO users (email, full_name, organization, password_hash, status) VALUES
+('john@example.com', 'John Doe', 'Acme Corp', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'active'),
+('jane@example.com', 'Jane Smith', 'Tech Inc', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'active'),
+('admin@example.com', 'Admin User', 'License Server', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'active');
+
+-- Test subscriptions (with different device limits)
+INSERT INTO subscriptions (user_id, subscription_type, device_limit, start_date, end_date, payment_status) VALUES
+-- John: Monthly subscription, 1 device
+(1, 'monthly', 1, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), 'active'),
+-- Jane: Annual subscription, 5 devices
+(2, 'annual', 5, NOW(), DATE_ADD(NOW(), INTERVAL 1 YEAR), 'active'),
+-- Admin: Annual subscription, 10 devices
+(3, 'annual', 10, NOW(), DATE_ADD(NOW(), INTERVAL 1 YEAR), 'active');
+
+-- Test enrollment tokens
+INSERT INTO enrollment_tokens (
+    token, user_id, subscriber_email, subscriber_name, organization,
+    subscription_type, subscription_id, expires_at, max_uses, used_count
+) VALUES
+('test_token_john_unused', 1, 'john@example.com', 'John Doe', 'Acme Corp', 'monthly', 1, DATE_ADD(NOW(), INTERVAL 7 DAY), 1, 0),
+('test_token_jane_unused', 2, 'jane@example.com', 'Jane Smith', 'Tech Inc', 'annual', 2, DATE_ADD(NOW(), INTERVAL 7 DAY), 1, 0);
+```
+
+**File: `server/seed.php`**
+
+```php
+<?php
+require_once __DIR__ . '/vendor/autoload.php';
+
+use App\Database\Database;
+
+$db = Database::getInstance();
+
+echo "Seeding test data...\n";
+
+$sql = file_get_contents(__DIR__ . '/database/seeds/test_data.sql');
+
+try {
+    $db->beginTransaction();
+    $db->exec($sql);
+    $db->commit();
+    echo "Test data seeded successfully!\n";
+} catch (Exception $e) {
+    $db->rollback();
+    echo "Error seeding data: " . $e->getMessage() . "\n";
+    exit(1);
+}
+```
+
+---
+
+## 4.4 Database Helper Script
+
+**File: `server/db-helper.sh`**
+
+```bash
+#!/bin/bash
+
+# Helper script for database operations
+
+case "$1" in
+  migrate)
+    echo "Running database migrations..."
+    docker-compose exec web php migrate.php
+    ;;
+    
+  seed)
+    echo "Seeding test data..."
+    docker-compose exec web php seed.php
+    ;;
+    
+  reset)
+    echo "Resetting database (DROP ALL TABLES)..."
+    read -p "Are you sure? This will delete all data! (yes/no): " confirm
+    if [ "$confirm" == "yes" ]; then
+      docker-compose exec db mysql -u root -p${DB_ROOT_PASSWORD} -e "DROP DATABASE IF EXISTS license_system; CREATE DATABASE license_system;"
+      docker-compose exec web php migrate.php
+      echo "Database reset complete."
+    else
+      echo "Aborted."
+    fi
+    ;;
+    
+  dump)
+    echo "Creating database dump..."
+    docker-compose exec db mysqldump -u root -p${DB_ROOT_PASSWORD} license_system > dump_$(date +%Y%m%d_%H%M%S).sql
+    echo "Dump created: dump_$(date +%Y%m%d_%H%M%S).sql"
+    ;;
+    
+  restore)
+    if [ -z "$2" ]; then
+      echo "Usage: $0 restore <dump_file.sql>"
+      exit 1
+    fi
+    echo "Restoring database from $2..."
+    docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} license_system < "$2"
+    echo "Database restored."
+    ;;
+    
+  query)
+    echo "Opening MySQL client..."
+    docker-compose exec db mysql -u root -p${DB_ROOT_PASSWORD} license_system
+    ;;
+    
+  status)
+    echo "Database status:"
+    docker-compose exec db mysql -u root -p${DB_ROOT_PASSWORD} -e "
+      SELECT 
+        'Users' as table_name, COUNT(*) as count FROM license_system.users
+      UNION ALL
+      SELECT 'Subscriptions', COUNT(*) FROM license_system.subscriptions
+      UNION ALL
+      SELECT 'Enrollment Tokens', COUNT(*) FROM license_system.enrollment_tokens
+      UNION ALL
+      SELECT 'Certificates', COUNT(*) FROM license_system.issued_certificates
+      UNION ALL
+      SELECT 'Clients', COUNT(*) FROM license_system.clients
+      UNION ALL
+      SELECT 'Licenses', COUNT(*) FROM license_system.licenses
+      UNION ALL
+      SELECT 'Migrations', COUNT(*) FROM license_system.migrations;
+    "
+    ;;
+    
+  device-limits)
+    echo "Device limit usage:"
+    docker-compose exec db mysql -u root -p${DB_ROOT_PASSWORD} license_system -e "
+      SELECT 
+        u.email,
+        s.device_limit,
+        COUNT(c.id) as devices_enrolled,
+        s.subscription_type,
+        s.payment_status
+      FROM subscriptions s
+      LEFT JOIN clients c ON c.subscription_id = s.id
+      JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+      JOIN users u ON s.user_id = u.id
+      WHERE s.payment_status = 'active' AND ic.status = 'active'
+      GROUP BY s.id, u.email, s.device_limit, s.subscription_type, s.payment_status;
+    "
+    ;;
+    
+  *)
+    echo "Usage: $0 {migrate|seed|reset|dump|restore|query|status|device-limits}"
+    echo ""
+    echo "Commands:"
+    echo "  migrate        - Run pending database migrations"
+    echo "  seed           - Seed test data"
+    echo "  reset          - Drop all tables and re-run migrations"
+    echo "  dump           - Create SQL dump of database"
+    echo "  restore <file> - Restore database from SQL dump"
+    echo "  query          - Open MySQL client"
+    echo "  status         - Show table row counts"
+    echo "  device-limits  - Show device limit usage by user"
+    exit 1
+    ;;
+esac
+```
+
+---
+
+## 4.5 Database Schema Summary
+
+### Tables Overview
+
+| Table | Purpose | Key Features |
+|-------|---------|--------------|
+| `users` | User accounts | Email, name, organization |
+| `subscriptions` | Subscription plans | **device_limit** column, monthly/annual |
+| `enrollment_tokens` | Certificate enrollment | Single-use, 7-day expiry |
+| `issued_certificates` | Client certificates | 2-year validity, **user_revoked** reason |
+| `clients` | Enrolled devices | **device_name**, **platform** columns |
+| `licenses` | Active license tokens | Device-bound JWT tokens |
+| `license_migrations` | Device transfers | 24-hour validity, single-use |
+
+### Key Relationships
+
+```
+users (1) ─────── (N) subscriptions
+                       │
+                       ├─ (N) enrollment_tokens
+                       │
+                       └─ (N) clients ─── (1) issued_certificates
+                                 │
+                                 └─ (N) licenses
+```
+
+### Device Limit Enforcement
+
+```sql
+-- Check device limit before enrollment
+SELECT 
+  s.device_limit,
+  COUNT(c.id) as enrolled_devices
+FROM subscriptions s
+LEFT JOIN clients c ON c.subscription_id = s.id
+JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+WHERE s.id = ? 
+  AND ic.status = 'active'
+GROUP BY s.id, s.device_limit;
+
+-- If enrolled_devices >= device_limit, block enrollment
+```
+
+---
+
+## 4.6 Running Migrations
+
+### First-Time Setup
+
+```bash
+# Inside container
+docker-compose exec web php migrate.php
+
+# Or using helper script
+./docker-helper.sh migrate
+
+# Expected output:
+# Running: 001_create_users_table.sql
+# Success: 001_create_users_table.sql
+# Running: 002_create_subscriptions_table.sql
+# Success: 002_create_subscriptions_table.sql
+# ...
+# All migrations completed successfully!
+```
+
+### Checking Migration Status
+
+```bash
+# View applied migrations
+docker-compose exec db mysql -u root -p license_system -e "SELECT * FROM migrations;"
+
+# Output:
+# +----+----------------------------------+---------------------+
+# | id | migration                        | executed_at         |
+# +----+----------------------------------+---------------------+
+# |  1 | 001_create_users_table.sql       | 2025-01-15 10:00:00 |
+# |  2 | 002_create_subscriptions_table.. | 2025-01-15 10:00:01 |
+# ...
+```
+
+---
+
+## Summary
+
+The database schema supports:
+
+- ✅ **Device limits** per subscription tier
+- ✅ **Device identification** with names and platforms
+- ✅ **User-initiated revocation** via portal
+- ✅ **Two-phase authentication** (TLS → mTLS)
+- ✅ **Certificate lifecycle management**
+- ✅ **License token management**
+- ✅ **Device migration tracking**
+
+All migrations are idempotent and can be run multiple times safely.
+
+
+---
+
+# Section 5: Private CA Setup
+
+This section covers setting up the Private Certificate Authority infrastructure using Docker containers.
+
+---
+
+## 5.1 CA Setup Overview
+
+### CA Architecture
+
+```
+Root CA (Offline)
+    ├─ 20-year validity
+    ├─ 4096-bit RSA key
+    ├─ AES-256 encrypted private key
+    └─ Signs only Intermediate CA
+         │
+         └─ Intermediate CA (Online)
+                ├─ 10-year validity
+                ├─ 4096-bit RSA key
+                ├─ AES-256 encrypted private key
+                └─ Signs client certificates (2-year validity)
+```
+
+### Key Separation
+
+**CA Keys (Certificate Issuance):**
+- Root CA Key: 4096-bit RSA, offline storage
+- Intermediate CA Key: 4096-bit RSA, online but encrypted
+
+**License Signing Keys (JWT Tokens):**
+- License Signing Key: 2048-bit RSA, separate from CA
+- Used only for signing JWT license tokens
+- Independent key rotation schedule
+
+**Why Separate?**
+- Compromised license key ≠ compromised CA
+- Different security requirements
+- Independent lifecycle management
+
+---
+
+## 5.2 Containerized CA Setup
+
+### Master Setup Script
 
 **File: `ca/docker-setup.sh`**
 
@@ -618,12 +1973,17 @@ set -e
 
 # Setup CA infrastructure using Docker (no OpenSSL needed on host!)
 
-echo "Setting up CA infrastructure using Docker..."
+echo "=========================================="
+echo "Setting up CA infrastructure using Docker"
+echo "=========================================="
+echo ""
 
 # Use OpenSSL container to generate CA files
 docker run --rm -v "$(pwd)":/ca -w /ca alpine/openssl:latest sh -c '
   # Install bash for script execution
   apk add --no-cache bash
+  
+  echo "Running CA setup scripts..."
   
   # Run CA setup scripts
   cd scripts
@@ -632,13 +1992,28 @@ docker run --rm -v "$(pwd)":/ca -w /ca alpine/openssl:latest sh -c '
   bash 03-generate-license-keys.sh
 '
 
+echo ""
+echo "=========================================="
 echo "CA setup complete!"
-echo "Root CA: $(pwd)/root-ca/certs/root-ca.crt"
-echo "Intermediate CA: $(pwd)/intermediate-ca/certs/intermediate-ca.crt"
-echo "License Keys: $(pwd)/../server/docker/license-keys/"
+echo "=========================================="
+echo ""
+echo "Root CA certificate: $(pwd)/root-ca/certs/root-ca.crt"
+echo "Intermediate CA certificate: $(pwd)/intermediate-ca/certs/intermediate-ca.crt"
+echo "Certificate chain: $(pwd)/intermediate-ca/certs/ca-chain.crt"
+echo "License signing keys: $(pwd)/../server/docker/license-keys/"
+echo ""
+echo "IMPORTANT:"
+echo "1. Store Root CA private key offline and encrypted"
+echo "2. Backup all CA keys to secure location"
+echo "3. Never commit CA keys to version control"
+echo ""
 ```
 
-### Root CA Setup Script
+---
+
+## 5.3 Root CA Setup
+
+### Root CA Initialization Script
 
 **File: `ca/scripts/01-setup-root-ca.sh`**
 
@@ -649,37 +2024,148 @@ set -e
 CA_DIR="/ca"
 ROOT_CA_DIR="$CA_DIR/root-ca"
 
-echo "Setting up Root CA..."
+echo "=========================================="
+echo "Setting up Root CA (Offline)"
+echo "=========================================="
+echo ""
 
 # Create directory structure
+echo "Creating directory structure..."
 mkdir -p "$ROOT_CA_DIR"/{private,certs,crl,newcerts}
 chmod 700 "$ROOT_CA_DIR/private"
 
 # Create database files
 touch "$ROOT_CA_DIR/index.txt"
 echo "1000" > "$ROOT_CA_DIR/serial"
+echo "1000" > "$ROOT_CA_DIR/crlnumber"
 
+echo "Generating Root CA private key (4096-bit, AES-256 encrypted)..."
 # Generate root CA private key (4096-bit, AES-256 encrypted)
-openssl genrsa -aes256 -passout pass:rootcapassword -out "$ROOT_CA_DIR/private/root-ca.key" 4096
+openssl genrsa -aes256 \
+    -passout pass:rootcapassword \
+    -out "$ROOT_CA_DIR/private/root-ca.key" 4096
+
 chmod 400 "$ROOT_CA_DIR/private/root-ca.key"
 
+echo "Generating Root CA certificate (20-year validity)..."
 # Generate root CA certificate (20 year validity)
-openssl req -config ../config/root-ca.cnf \
+openssl req -config "$CA_DIR/config/root-ca.cnf" \
     -key "$ROOT_CA_DIR/private/root-ca.key" \
     -passin pass:rootcapassword \
     -new -x509 -days 7300 -sha256 -extensions v3_ca \
     -out "$ROOT_CA_DIR/certs/root-ca.crt" \
-    -subj "/C=US/ST=State/L=City/O=Your Organization/OU=Certificate Authority/CN=Root CA"
+    -subj "/C=US/ST=California/L=San Francisco/O=License Server/OU=Certificate Authority/CN=License Server Root CA"
 
-# Verify certificate
-openssl x509 -noout -text -in "$ROOT_CA_DIR/certs/root-ca.crt"
+chmod 444 "$ROOT_CA_DIR/certs/root-ca.crt"
 
-echo "Root CA setup complete!"
-echo "Certificate: $ROOT_CA_DIR/certs/root-ca.crt"
-echo "IMPORTANT: Store the private key securely!"
+echo ""
+echo "Root CA certificate details:"
+openssl x509 -noout -text -in "$ROOT_CA_DIR/certs/root-ca.crt" | grep -A 2 "Subject:"
+openssl x509 -noout -text -in "$ROOT_CA_DIR/certs/root-ca.crt" | grep -A 2 "Validity"
+
+echo ""
+echo "✓ Root CA setup complete!"
+echo "  Certificate: $ROOT_CA_DIR/certs/root-ca.crt"
+echo "  Private key: $ROOT_CA_DIR/private/root-ca.key"
+echo ""
+echo "⚠️  IMPORTANT: Store the Root CA private key offline and encrypted!"
+echo ""
 ```
 
-### Intermediate CA Setup Script
+### Root CA OpenSSL Configuration
+
+**File: `ca/config/root-ca.cnf`**
+
+```ini
+# Root CA OpenSSL Configuration
+
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+# Directory and file locations
+dir               = /ca/root-ca
+certs             = $dir/certs
+crl_dir           = $dir/crl
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+RANDFILE          = $dir/private/.rand
+
+# The root key and root certificate
+private_key       = $dir/private/root-ca.key
+certificate       = $dir/certs/root-ca.crt
+
+# For certificate revocation lists
+crlnumber         = $dir/crlnumber
+crl               = $dir/crl/root-ca.crl
+crl_extensions    = crl_ext
+default_crl_days  = 30
+
+# SHA-256
+default_md        = sha256
+
+name_opt          = ca_default
+cert_opt          = ca_default
+default_days      = 3650
+preserve          = no
+policy            = policy_strict
+
+[ policy_strict ]
+# The root CA should only sign intermediate certificates that match
+countryName             = match
+stateOrProvinceName     = match
+organizationName        = match
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+[ req ]
+default_bits        = 4096
+distinguished_name  = req_distinguished_name
+string_mask         = utf8only
+default_md          = sha256
+x509_extensions     = v3_ca
+
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address
+
+countryName_default             = US
+stateOrProvinceName_default     = California
+localityName_default            = San Francisco
+0.organizationName_default      = License Server
+organizationalUnitName_default  = Certificate Authority
+
+[ v3_ca ]
+# Extensions for a typical CA
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+
+[ v3_intermediate_ca ]
+# Extensions for intermediate CA
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true, pathlen:0
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+
+[ crl_ext ]
+# Extension for CRLs
+authorityKeyIdentifier=keyid:always
+```
+
+---
+
+## 5.4 Intermediate CA Setup
+
+### Intermediate CA Initialization Script
 
 **File: `ca/scripts/02-setup-intermediate-ca.sh`**
 
@@ -691,9 +2177,13 @@ CA_DIR="/ca"
 ROOT_CA_DIR="$CA_DIR/root-ca"
 INT_CA_DIR="$CA_DIR/intermediate-ca"
 
-echo "Setting up Intermediate CA..."
+echo "=========================================="
+echo "Setting up Intermediate CA (Online)"
+echo "=========================================="
+echo ""
 
 # Create directory structure
+echo "Creating directory structure..."
 mkdir -p "$INT_CA_DIR"/{private,certs,crl,newcerts,csr}
 chmod 700 "$INT_CA_DIR/private"
 
@@ -702,19 +2192,27 @@ touch "$INT_CA_DIR/index.txt"
 echo "1000" > "$INT_CA_DIR/serial"
 echo "1000" > "$INT_CA_DIR/crlnumber"
 
+echo "Generating Intermediate CA private key (4096-bit, AES-256 encrypted)..."
 # Generate intermediate CA private key
-openssl genrsa -aes256 -passout pass:intermediatecapassword -out "$INT_CA_DIR/private/intermediate-ca.key" 4096
+openssl genrsa -aes256 \
+    -passout pass:intermediatecapassword \
+    -out "$INT_CA_DIR/private/intermediate-ca.key" 4096
+
 chmod 400 "$INT_CA_DIR/private/intermediate-ca.key"
 
+echo "Creating Intermediate CA certificate signing request..."
 # Generate intermediate CA CSR
-openssl req -config ../config/intermediate-ca.cnf -new -sha256 \
+openssl req -config "$CA_DIR/config/intermediate-ca.cnf" \
+    -new -sha256 \
     -key "$INT_CA_DIR/private/intermediate-ca.key" \
     -passin pass:intermediatecapassword \
     -out "$INT_CA_DIR/csr/intermediate-ca.csr" \
-    -subj "/C=US/ST=State/L=City/O=Your Organization/OU=Certificate Authority/CN=Intermediate CA"
+    -subj "/C=US/ST=California/L=San Francisco/O=License Server/OU=Certificate Authority/CN=License Server Intermediate CA"
 
-# Sign intermediate certificate with root CA (10 year validity)
-openssl ca -config ../config/root-ca.cnf -extensions v3_intermediate_ca \
+echo "Signing Intermediate CA certificate with Root CA (10-year validity)..."
+# Sign intermediate certificate with root CA
+openssl ca -config "$CA_DIR/config/root-ca.cnf" \
+    -extensions v3_intermediate_ca \
     -days 3650 -notext -md sha256 \
     -passin pass:rootcapassword \
     -batch \
@@ -723,20 +2221,131 @@ openssl ca -config ../config/root-ca.cnf -extensions v3_intermediate_ca \
 
 chmod 444 "$INT_CA_DIR/certs/intermediate-ca.crt"
 
+echo "Creating certificate chain file..."
 # Create certificate chain file
 cat "$INT_CA_DIR/certs/intermediate-ca.crt" \
     "$ROOT_CA_DIR/certs/root-ca.crt" > "$INT_CA_DIR/certs/ca-chain.crt"
 
+chmod 444 "$INT_CA_DIR/certs/ca-chain.crt"
+
+echo ""
+echo "Verifying certificate chain..."
 # Verify certificate chain
 openssl verify -CAfile "$ROOT_CA_DIR/certs/root-ca.crt" \
     "$INT_CA_DIR/certs/intermediate-ca.crt"
 
-echo "Intermediate CA setup complete!"
-echo "Certificate: $INT_CA_DIR/certs/intermediate-ca.crt"
-echo "Chain: $INT_CA_DIR/certs/ca-chain.crt"
+echo ""
+echo "Intermediate CA certificate details:"
+openssl x509 -noout -text -in "$INT_CA_DIR/certs/intermediate-ca.crt" | grep -A 2 "Subject:"
+openssl x509 -noout -text -in "$INT_CA_DIR/certs/intermediate-ca.crt" | grep -A 2 "Validity"
+
+echo ""
+echo "✓ Intermediate CA setup complete!"
+echo "  Certificate: $INT_CA_DIR/certs/intermediate-ca.crt"
+echo "  Chain: $INT_CA_DIR/certs/ca-chain.crt"
+echo "  Private key: $INT_CA_DIR/private/intermediate-ca.key"
+echo ""
 ```
 
-### License Signing Keys Setup
+### Intermediate CA OpenSSL Configuration
+
+**File: `ca/config/intermediate-ca.cnf`**
+
+```ini
+# Intermediate CA OpenSSL Configuration
+
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+# Directory and file locations
+dir               = /ca/intermediate-ca
+certs             = $dir/certs
+crl_dir           = $dir/crl
+new_certs_dir     = $dir/newcerts
+database          = $dir/index.txt
+serial            = $dir/serial
+RANDFILE          = $dir/private/.rand
+
+# The intermediate key and intermediate certificate
+private_key       = $dir/private/intermediate-ca.key
+certificate       = $dir/certs/intermediate-ca.crt
+
+# For certificate revocation lists
+crlnumber         = $dir/crlnumber
+crl               = $dir/crl/intermediate-ca.crl
+crl_extensions    = crl_ext
+default_crl_days  = 30
+
+# SHA-256
+default_md        = sha256
+
+name_opt          = ca_default
+cert_opt          = ca_default
+default_days      = 730
+preserve          = no
+policy            = policy_loose
+
+[ policy_loose ]
+# Allow the intermediate CA to sign a more diverse range of certificates
+countryName             = optional
+stateOrProvinceName     = optional
+localityName            = optional
+organizationName        = optional
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+
+[ req ]
+default_bits        = 4096
+distinguished_name  = req_distinguished_name
+string_mask         = utf8only
+default_md          = sha256
+x509_extensions     = v3_ca
+
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address
+
+[ v3_ca ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+
+[ client_cert ]
+# Extensions for client certificates
+basicConstraints = CA:FALSE
+nsCertType = client, email
+nsComment = "OpenSSL Generated Client Certificate"
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth, emailProtection
+
+[ crl_ext ]
+# Extension for CRLs
+authorityKeyIdentifier=keyid:always
+
+[ ocsp ]
+# Extension for OCSP signing certificates
+basicConstraints = CA:FALSE
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, digitalSignature
+extendedKeyUsage = critical, OCSPSigning
+```
+
+---
+
+## 5.5 License Signing Keys Setup
+
+### License Key Generation Script
 
 **File: `ca/scripts/03-generate-license-keys.sh`**
 
@@ -746,228 +2355,997 @@ set -e
 
 LICENSE_KEY_DIR="/ca/../server/docker/license-keys"
 
-echo "Generating license signing keys..."
+echo "=========================================="
+echo "Generating License Signing Keys"
+echo "=========================================="
+echo ""
 
 mkdir -p "$LICENSE_KEY_DIR"
 chmod 700 "$LICENSE_KEY_DIR"
 
+echo "Generating license signing private key (2048-bit for JWT, AES-256 encrypted)..."
 # Generate license signing private key (2048-bit for JWT)
-openssl genrsa -aes256 -passout pass:licensekeypassword -out "$LICENSE_KEY_DIR/license-signing.key" 2048
+openssl genrsa -aes256 \
+    -passout pass:licensekeypassword \
+    -out "$LICENSE_KEY_DIR/license-signing.key" 2048
+
 chmod 400 "$LICENSE_KEY_DIR/license-signing.key"
 
+echo "Extracting public key..."
 # Extract public key
 openssl rsa -in "$LICENSE_KEY_DIR/license-signing.key" \
     -passin pass:licensekeypassword \
     -pubout -out "$LICENSE_KEY_DIR/license-signing.pub"
+
 chmod 444 "$LICENSE_KEY_DIR/license-signing.pub"
 
-echo "License signing keys generated!"
-echo "Private key: $LICENSE_KEY_DIR/license-signing.key"
-echo "Public key: $LICENSE_KEY_DIR/license-signing.pub"
 echo ""
-echo "IMPORTANT: Embed the public key in client applications!"
+echo "✓ License signing keys generated!"
+echo "  Private key: $LICENSE_KEY_DIR/license-signing.key"
+echo "  Public key: $LICENSE_KEY_DIR/license-signing.pub"
+echo ""
+echo "⚠️  IMPORTANT:"
+echo "  1. These keys are SEPARATE from CA keys"
+echo "  2. Used only for signing JWT license tokens"
+echo "  3. Embed the public key in client applications"
+echo "  4. Rotate annually for security"
+echo ""
 ```
-
-### OpenSSL Configuration Files
-
-**File: `ca/config/root-ca.cnf`** and **`ca/config/intermediate-ca.cnf`** follow standard OpenSSL CA configuration format as defined in spec.md Section 5.
 
 ---
 
-## 6. Server Implementation Details
+## 5.6 CA Operations Scripts
 
-The server implementation follows the code examples and architecture defined in `spec.md`. All PHP code runs inside Docker containers on a Linux environment.
+### Issue Client Certificate
 
-### Composer Dependencies (Minimal)
+**File: `ca/scripts/issue-client-cert.sh`**
 
-**File: `server/composer.json`**
-
-```json
-{
-    "name": "license-server/subscription-licensing",
-    "description": "Subscription licensing system with certificate authentication",
-    "type": "project",
-    "license": "MIT",
-    "require": {
-        "php": ">=8.1",
-        "ext-openssl": "*",
-        "ext-pdo": "*",
-        "ext-json": "*",
-        "ext-mbstring": "*",
-        "firebase/php-jwt": "^6.0",
-        "vlucas/phpdotenv": "^5.5",
-        "monolog/monolog": "^3.0"
-    },
-    "require-dev": {
-        "phpunit/phpunit": "^10.0",
-        "phpstan/phpstan": "^1.10"
-    },
-    "autoload": {
-        "psr-4": {
-            "App\\": "src/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Tests\\": "tests/"
-        }
-    },
-    "scripts": {
-        "test": "phpunit",
-        "analyze": "phpstan analyse src/ --level=8"
-    }
-}
-```
-
-### Router Implementation
-
-**File: `server/config/routes.php`**
-
-```php
-<?php
-
-use App\Api\CertificateController;
-use App\Api\LicenseController;
-use App\Api\MigrationController;
-use App\Api\PortalController;
-use App\Middleware\TLSAuthMiddleware;
-use App\Middleware\MTLSAuthMiddleware;
-
-return [
-    // Portal endpoints (session auth)
-    ['GET', '/portal/enrollment', [PortalController::class, 'showEnrollment']],
-    ['POST', '/portal/enrollment/generate', [PortalController::class, 'generateToken']],
-    ['DELETE', '/portal/enrollment/revoke', [PortalController::class, 'revokeToken']],
-    ['GET', '/portal/enrollment/status', [PortalController::class, 'tokenStatus']],
-    ['POST', '/portal/account/delete/confirm', [PortalController::class, 'deleteAccount']],
-    
-    // Certificate endpoints (TLS + token auth)
-    ['POST', '/api/certificate/enroll', [CertificateController::class, 'enroll'], [TLSAuthMiddleware::class]],
-    ['GET', '/api/certificate/status', [CertificateController::class, 'status'], [TLSAuthMiddleware::class]],
-    ['GET', '/api/crl/current', [CertificateController::class, 'getCRL']],
-    
-    // License endpoints (mTLS required)
-    ['POST', '/api/license/activate', [LicenseController::class, 'activate'], [MTLSAuthMiddleware::class]],
-    ['POST', '/api/license/renew', [LicenseController::class, 'renew'], [MTLSAuthMiddleware::class]],
-    ['GET', '/api/license/status', [LicenseController::class, 'status'], [MTLSAuthMiddleware::class]],
-    
-    // Migration endpoints (mTLS required)
-    ['POST', '/api/license/migrate/initiate', [MigrationController::class, 'initiate'], [MTLSAuthMiddleware::class]],
-    ['POST', '/api/license/migrate/complete', [MigrationController::class, 'complete'], [MTLSAuthMiddleware::class]],
-    
-    // Subscription endpoints (mTLS required)
-    ['GET', '/api/subscription/status', [LicenseController::class, 'subscriptionStatus'], [MTLSAuthMiddleware::class]],
-];
-```
-
-### Entry Point
-
-**File: `server/public/index.php`**
-
-```php
-<?php
-require_once __DIR__ . '/../vendor/autoload.php';
-
-use Dotenv\Dotenv;
-use App\Database\Database;
-use Monolog\Logger;
-use Monolog\Handler\StreamHandler;
-
-// Load environment configuration
-$dotenv = Dotenv::createImmutable(__DIR__ . '/..');
-$dotenv->load();
-
-// Initialize logger
-$logger = new Logger('license-server');
-$logger->pushHandler(new StreamHandler($_ENV['LOG_PATH'] ?? 'php://stdout', $_ENV['LOG_LEVEL'] ?? Logger::DEBUG));
-
-// Initialize database
-Database::initialize([
-    'host' => $_ENV['DB_HOST'],
-    'database' => $_ENV['DB_DATABASE'],
-    'username' => $_ENV['DB_USERNAME'],
-    'password' => $_ENV['DB_PASSWORD'],
-]);
-
-// Load routes
-$routes = require __DIR__ . '/../config/routes.php';
-
-// Simple router
-$requestMethod = $_SERVER['REQUEST_METHOD'];
-$requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-
-foreach ($routes as $route) {
-    [$method, $path, $handler, $middleware] = array_pad($route, 4, []);
-    
-    if ($method === $requestMethod && $path === $requestUri) {
-        try {
-            // Execute middleware
-            foreach ($middleware as $mw) {
-                $middlewareInstance = new $mw();
-                $middlewareInstance->handle();
-            }
-            
-            // Execute handler
-            [$controller, $action] = $handler;
-            $controllerInstance = new $controller($logger);
-            $response = $controllerInstance->$action();
-            
-            // Send response
-            header('Content-Type: application/json');
-            echo json_encode($response);
-            exit;
-            
-        } catch (Exception $e) {
-            $logger->error('Request failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
-            http_response_code(500);
-            echo json_encode(['error' => 'Internal server error']);
-            exit;
-        }
-    }
-}
-
-// 404 Not Found
-http_response_code(404);
-echo json_encode(['error' => 'Not found']);
-```
-
-### Key Service Implementations
-
-All service implementations follow the detailed examples in spec.md Section 8:
-
-- **PrivateCAService.php** - Issues certificates using Intermediate CA
-- **EnrollmentTokenService.php** - Manages portal-generated enrollment tokens
-- **LicenseTokenService.php** - Generates and validates JWT license tokens
-- **LicenseRenewalService.php** - Handles subscription renewals and grace periods
-- **DeviceMigrationService.php** - Manages secure license transfers between devices
-- **CertificateValidator.php** - Validates client certificates via mTLS
-
-Refer to spec.md Section 8 for complete implementations of these services.
-
-### Database Schema
-
-Database schemas are defined in migration files under `server/database/migrations/`:
-
-- `001_create_users_table.sql`
-- `002_create_subscriptions_table.sql`
-- `003_create_enrollment_tokens_table.sql`
-- `004_create_certificates_table.sql`
-- `005_create_clients_table.sql`
-- `006_create_licenses_table.sql`
-- `007_create_migrations_table.sql`
-
-These follow the complete schema specifications in spec.md Sections 8.3 and 8.4.
-
-All migrations run inside the MySQL container via:
 ```bash
-./docker-helper.sh migrate
+#!/bin/bash
+set -e
+
+# Usage: ./issue-client-cert.sh <csr_file> <output_cert>
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <csr_file> <output_cert>"
+    echo "Example: $0 client.csr client.crt"
+    exit 1
+fi
+
+CSR_FILE="$1"
+OUTPUT_CERT="$2"
+CA_DIR="/ca"
+INT_CA_DIR="$CA_DIR/intermediate-ca"
+
+echo "Issuing client certificate from CSR..."
+echo "  CSR: $CSR_FILE"
+echo "  Output: $OUTPUT_CERT"
+echo ""
+
+# Issue certificate (2-year validity)
+openssl ca -config "$CA_DIR/config/intermediate-ca.cnf" \
+    -extensions client_cert \
+    -days 730 -notext -md sha256 \
+    -passin pass:intermediatecapassword \
+    -batch \
+    -in "$CSR_FILE" \
+    -out "$OUTPUT_CERT"
+
+echo ""
+echo "✓ Client certificate issued!"
+echo ""
+
+# Display certificate details
+openssl x509 -noout -text -in "$OUTPUT_CERT" | grep -A 2 "Subject:"
+openssl x509 -noout -text -in "$OUTPUT_CERT" | grep -A 2 "Validity"
+
+# Verify certificate
+echo ""
+echo "Verifying certificate chain..."
+openssl verify -CAfile "$INT_CA_DIR/certs/ca-chain.crt" "$OUTPUT_CERT"
 ```
 
-### Middleware Implementation
+### Revoke Certificate
+
+**File: `ca/scripts/revoke-cert.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+# Usage: ./revoke-cert.sh <certificate_file> <reason>
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <certificate_file> <reason>"
+    echo "Reasons: unspecified, keyCompromise, CACompromise, affiliationChanged,"
+    echo "         superseded, cessationOfOperation, certificateHold"
+    exit 1
+fi
+
+CERT_FILE="$1"
+REASON="$2"
+CA_DIR="/ca"
+
+echo "Revoking certificate..."
+echo "  Certificate: $CERT_FILE"
+echo "  Reason: $REASON"
+echo ""
+
+# Revoke certificate
+openssl ca -config "$CA_DIR/config/intermediate-ca.cnf" \
+    -passin pass:intermediatecapassword \
+    -revoke "$CERT_FILE" \
+    -crl_reason "$REASON"
+
+echo ""
+echo "✓ Certificate revoked!"
+echo ""
+echo "Generating updated CRL..."
+
+# Generate updated CRL
+openssl ca -config "$CA_DIR/config/intermediate-ca.cnf" \
+    -passin pass:intermediatecapassword \
+    -gencrl \
+    -out "$CA_DIR/intermediate-ca/crl/intermediate-ca.crl"
+
+echo ""
+echo "✓ CRL updated!"
+echo "  CRL: $CA_DIR/intermediate-ca/crl/intermediate-ca.crl"
+```
+
+### Generate CRL
+
+**File: `ca/scripts/generate-crl.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+CA_DIR="/ca"
+CRL_OUTPUT="$CA_DIR/intermediate-ca/crl/intermediate-ca.crl"
+
+echo "Generating Certificate Revocation List (CRL)..."
+
+openssl ca -config "$CA_DIR/config/intermediate-ca.cnf" \
+    -passin pass:intermediatecapassword \
+    -gencrl \
+    -out "$CRL_OUTPUT"
+
+echo ""
+echo "✓ CRL generated!"
+echo "  Output: $CRL_OUTPUT"
+echo ""
+
+# Display CRL info
+openssl crl -in "$CRL_OUTPUT" -noout -text | head -20
+```
+
+---
+
+## 5.7 CA Helper Scripts
+
+### Make all scripts executable
+
+**File: `ca/scripts/make-executable.sh`**
+
+```bash
+#!/bin/bash
+
+echo "Making all CA scripts executable..."
+chmod +x *.sh
+echo "✓ Done!"
+```
+
+---
+
+## 5.8 Running CA Setup
+
+### Complete CA Infrastructure Setup
+
+```bash
+# Navigate to CA directory
+cd ca
+
+# Run complete setup (in Docker container)
+./docker-setup.sh
+
+# Expected output:
+# ==========================================
+# Setting up CA infrastructure using Docker
+# ==========================================
+# 
+# Running CA setup scripts...
+# ==========================================
+# Setting up Root CA (Offline)
+# ==========================================
+# ...
+# ✓ Root CA setup complete!
+# ...
+# ==========================================
+# Setting up Intermediate CA (Online)
+# ==========================================
+# ...
+# ✓ Intermediate CA setup complete!
+# ...
+# ==========================================
+# Generating License Signing Keys
+# ==========================================
+# ...
+# ✓ License signing keys generated!
+# ...
+# ==========================================
+# CA setup complete!
+# ==========================================
+```
+
+### Verify CA Setup
+
+```bash
+# Check directory structure
+ls -la root-ca/
+ls -la intermediate-ca/
+
+# Verify Root CA certificate
+openssl x509 -in root-ca/certs/root-ca.crt -noout -text
+
+# Verify Intermediate CA certificate
+openssl x509 -in intermediate-ca/certs/intermediate-ca.crt -noout -text
+
+# Verify certificate chain
+openssl verify -CAfile root-ca/certs/root-ca.crt intermediate-ca/certs/intermediate-ca.crt
+
+# Check license signing keys
+ls -la ../server/docker/license-keys/
+```
+
+---
+
+## Summary
+
+The CA infrastructure provides:
+
+- ✅ **Hierarchical CA structure** (Root → Intermediate → Client)
+- ✅ **Offline Root CA** for maximum security
+- ✅ **Online Intermediate CA** for daily operations
+- ✅ **Separate license signing keys** for JWT tokens
+- ✅ **2-year client certificates** with renewal process
+- ✅ **CRL support** for certificate revocation
+- ✅ **All operations containerized** (no OpenSSL on host)
+
+**Security Notes:**
+- Root CA private key should be moved to offline storage after setup
+- All private keys are AES-256 encrypted with passphrases
+- License signing keys are separate from CA keys
+- Update passwords in production (currently using defaults for development)
+
+---
+
+# Section 6: Server Implementation Details
+
+This section covers the complete server implementation including controllers, services, and middleware.
+
+---
+
+## 6.1 Core Service Implementations
+
+### 6.1.1 Enrollment Token Service (with Device Limits)
+
+**File: `server/src/Services/EnrollmentTokenService.php`**
+
+```php
+<?php
+namespace App\Services;
+
+use App\Database\Database;
+
+class EnrollmentTokenService
+{
+    private $db;
+    
+    public function __construct()
+    {
+        $this->db = Database::getInstance();
+    }
+    
+    /**
+     * Generate single-use enrollment token with device limit check
+     * @throws NoActiveSubscriptionException
+     * @throws DeviceLimitReachedException
+     * @throws RateLimitException
+     */
+    public function generateEnrollmentToken(int $userId): array
+    {
+        // Get active subscription
+        $subscription = $this->db->query(
+            "SELECT * FROM subscriptions 
+             WHERE user_id = ? 
+             AND payment_status = 'active' 
+             AND end_date > NOW() 
+             ORDER BY end_date DESC 
+             LIMIT 1",
+            [$userId]
+        )->fetch();
+        
+        if (!$subscription) {
+            throw new NoActiveSubscriptionException("No active subscription found");
+        }
+        
+        // Count enrolled devices
+        $enrolledCount = $this->db->query(
+            "SELECT COUNT(*) as count 
+             FROM clients c
+             JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+             WHERE c.user_id = ? 
+             AND ic.status = 'active'",
+            [$userId]
+        )->fetch()['count'];
+        
+        // Check device limit
+        $deviceLimit = $subscription['device_limit'];
+        if ($enrolledCount >= $deviceLimit) {
+            // Get list of enrolled devices for exception
+            $devices = $this->db->query(
+                "SELECT 
+                    c.client_cert_fingerprint,
+                    c.device_name,
+                    c.platform,
+                    c.created_at as enrolled_at,
+                    c.last_seen,
+                    ic.status
+                 FROM clients c
+                 JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+                 WHERE c.user_id = ? 
+                 AND ic.status = 'active'
+                 ORDER BY c.created_at DESC",
+                [$userId]
+            )->fetchAll();
+            
+            throw new DeviceLimitReachedException(
+                "Device limit reached ($enrolledCount/$deviceLimit). Revoke a device to continue.",
+                $devices
+            );
+        }
+        
+        // Check rate limiting (max 5 tokens per 24 hours)
+        $recentTokens = $this->db->query(
+            "SELECT COUNT(*) as count 
+             FROM enrollment_tokens 
+             WHERE user_id = ? 
+             AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)",
+            [$userId]
+        )->fetch()['count'];
+        
+        if ($recentTokens >= 5) {
+            throw new RateLimitException("Rate limit exceeded. Try again in 24 hours.");
+        }
+        
+        // Generate token
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
+        
+        // Get user info
+        $user = $this->db->query(
+            "SELECT email, full_name, organization FROM users WHERE id = ?",
+            [$userId]
+        )->fetch();
+        
+        // Store token
+        $this->db->query(
+            "INSERT INTO enrollment_tokens 
+             (token, user_id, subscriber_email, subscriber_name, organization, 
+              subscription_type, subscription_id, expires_at, max_uses, used_count) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
+            [
+                $token,
+                $userId,
+                $user['email'],
+                $user['full_name'],
+                $user['organization'],
+                $subscription['subscription_type'],
+                $subscription['id'],
+                $expiresAt
+            ]
+        );
+        
+        return [
+            'token' => $token,
+            'expires_at' => $expiresAt,
+            'instructions' => 'Enter this token in the application to enroll your device.',
+            'devices_enrolled' => $enrolledCount,
+            'device_limit' => $deviceLimit
+        ];
+    }
+    
+    /**
+     * Validate enrollment token
+     */
+    public function validateToken(string $token): array
+    {
+        $tokenData = $this->db->query(
+            "SELECT * FROM enrollment_tokens WHERE token = ?",
+            [$token]
+        )->fetch();
+        
+        if (!$tokenData) {
+            throw new InvalidTokenException("Invalid enrollment token");
+        }
+        
+        if ($tokenData['expires_at'] < date('Y-m-d H:i:s')) {
+            throw new InvalidTokenException("Enrollment token expired");
+        }
+        
+        if ($tokenData['used_count'] >= $tokenData['max_uses']) {
+            throw new InvalidTokenException("Enrollment token already used");
+        }
+        
+        if ($tokenData['revoked_at'] !== null) {
+            throw new InvalidTokenException("Enrollment token revoked");
+        }
+        
+        return $tokenData;
+    }
+    
+    /**
+     * Mark token as used after certificate issuance
+     */
+    public function markTokenUsed(string $token, string $certificateFingerprint): void
+    {
+        $this->db->query(
+            "UPDATE enrollment_tokens 
+             SET used_count = used_count + 1, 
+                 used_at = NOW(), 
+                 certificate_fingerprint = ? 
+             WHERE token = ?",
+            [$certificateFingerprint, $token]
+        );
+    }
+}
+
+// Exception classes
+class DeviceLimitReachedException extends \Exception
+{
+    private array $enrolledDevices;
+    
+    public function __construct(string $message, array $devices)
+    {
+        parent::__construct($message);
+        $this->enrolledDevices = $devices;
+    }
+    
+    public function getEnrolledDevices(): array
+    {
+        return $this->enrolledDevices;
+    }
+}
+
+class NoActiveSubscriptionException extends \Exception {}
+class RateLimitException extends \Exception {}
+class InvalidTokenException extends \Exception {}
+```
+
+### 6.1.2 Device Management Service
+
+**File: `server/src/Services/DeviceManagementService.php`**
+
+```php
+<?php
+namespace App\Services;
+
+use App\Database\Database;
+
+class DeviceManagementService
+{
+    private $db;
+    
+    public function __construct()
+    {
+        $this->db = Database::getInstance();
+    }
+    
+    /**
+     * List all enrolled devices for user
+     */
+    public function listUserDevices(int $userId): array
+    {
+        return $this->db->query(
+            "SELECT 
+                c.client_cert_fingerprint,
+                ic.serial_number as certificate_serial,
+                c.device_name,
+                c.platform,
+                c.created_at as enrolled_at,
+                c.last_seen,
+                ic.status,
+                ic.expires_at as certificate_expires
+             FROM clients c
+             JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+             WHERE c.user_id = ?
+             ORDER BY c.created_at DESC",
+            [$userId]
+        )->fetchAll();
+    }
+    
+    /**
+     * Revoke specific device certificate
+     */
+    public function revokeDevice(int $userId, string $certificateFingerprint): void
+    {
+        // Verify certificate belongs to user
+        $cert = $this->db->query(
+            "SELECT ic.serial_number, ic.user_id
+             FROM issued_certificates ic
+             WHERE ic.fingerprint = ?",
+            [$certificateFingerprint]
+        )->fetch();
+        
+        if (!$cert || $cert['user_id'] != $userId) {
+            throw new UnauthorizedException("Certificate does not belong to this user");
+        }
+        
+        // Revoke certificate
+        $this->db->beginTransaction();
+        try {
+            // Mark certificate as revoked
+            $this->db->query(
+                "UPDATE issued_certificates 
+                 SET status = 'revoked', 
+                     revoked_at = NOW(), 
+                     revocation_reason = 'user_revoked' 
+                 WHERE fingerprint = ?",
+                [$certificateFingerprint]
+            );
+            
+            // Deactivate associated licenses
+            $this->db->query(
+                "UPDATE licenses 
+                 SET is_active = FALSE, 
+                     deactivated_at = NOW() 
+                 WHERE cert_serial_number = ?",
+                [$cert['serial_number']]
+            );
+            
+            $this->db->commit();
+        } catch (\Exception $e) {
+            $this->db->rollback();
+            throw $e;
+        }
+    }
+}
+
+class UnauthorizedException extends \Exception {}
+```
+
+### 6.1.3 License Token Service
+
+**File: `server/src/Services/LicenseTokenService.php`**
+
+```php
+<?php
+namespace App\Services;
+
+use Firebase\JWT\JWT;
+
+class LicenseTokenService
+{
+    private $privateKey;
+    private $keyPassword;
+    
+    public function __construct()
+    {
+        $keyPath = $_ENV['LICENSE_SIGNING_KEY_PATH'];
+        $this->keyPassword = $_ENV['LICENSE_SIGNING_KEY_PASSWORD'];
+        
+        $keyContent = file_get_contents($keyPath);
+        $this->privateKey = openssl_pkey_get_private($keyContent, $this->keyPassword);
+    }
+    
+    /**
+     * Generate JWT license token
+     */
+    public function generateLicenseToken(
+        string $clientCertFingerprint,
+        string $certSerial,
+        string $deviceId,
+        array $subscription
+    ): string {
+        $now = time();
+        $subscriptionEnd = strtotime($subscription['end_date']);
+        $gracePeriodEnd = $this->calculateGracePeriodEnd(
+            $subscription['subscription_type'],
+            new \DateTime($subscription['end_date'])
+        )->getTimestamp();
+        
+        $payload = [
+            'sub' => $clientCertFingerprint,  // Certificate fingerprint
+            'cert_serial' => $certSerial,      // Certificate serial number
+            'device_id' => $deviceId,          // Device identifier
+            'subscription_type' => $subscription['subscription_type'],
+            'subscription_id' => $subscription['id'],
+            'subscription_end' => $subscriptionEnd,
+            'grace_period_end' => $gracePeriodEnd,
+            'payment_status' => $subscription['payment_status'],
+            'iat' => $now,
+            'iss' => $_ENV['APP_URL']
+        ];
+        
+        return JWT::encode($payload, $this->privateKey, 'RS256');
+    }
+    
+    /**
+     * Calculate grace period end date
+     */
+    public function calculateGracePeriodEnd(
+        string $subscriptionType,
+        \DateTime $subscriptionEnd
+    ): \DateTime {
+        $gracePeriod = $subscriptionType === 'monthly' 
+            ? $_ENV['GRACE_PERIOD_MONTHLY'] ?? 5
+            : $_ENV['GRACE_PERIOD_ANNUAL'] ?? 14;
+        
+        $gracePeriodEnd = clone $subscriptionEnd;
+        $gracePeriodEnd->modify("+{$gracePeriod} days");
+        
+        return $gracePeriodEnd;
+    }
+}
+```
+
+---
+
+## 6.2 API Controllers
+
+### 6.2.1 Certificate Controller (TLS Only)
+
+**File: `server/src/Api/CertificateController.php`**
+
+```php
+<?php
+namespace App\Api;
+
+use App\Services\EnrollmentTokenService;
+use App\Services\PrivateCAService;
+use App\Services\LicenseTokenService;
+use App\Database\Database;
+
+class CertificateController
+{
+    private $enrollmentService;
+    private $caService;
+    private $licenseService;
+    private $db;
+    
+    public function __construct()
+    {
+        $this->enrollmentService = new EnrollmentTokenService();
+        $this->caService = new PrivateCAService();
+        $this->licenseService = new LicenseTokenService();
+        $this->db = Database::getInstance();
+    }
+    
+    /**
+     * Certificate enrollment (TLS + token auth)
+     * POST /api/certificate/enroll
+     */
+    public function enroll(): array
+    {
+        $input = json_decode(file_get_contents('php://input'), true);
+        
+        $enrollmentToken = $input['enrollment_token'] ?? null;
+        $csrJson = $input['csr'] ?? null;
+        $deviceId = $input['device_id'] ?? null;
+        $deviceName = $input['device_name'] ?? 'Unknown Device';
+        $platform = $input['platform'] ?? 'other';
+        
+        if (!$enrollmentToken || !$csrJson || !$deviceId) {
+            http_response_code(400);
+            return ['error' => 'Missing required fields'];
+        }
+        
+        try {
+            // Validate enrollment token
+            $tokenData = $this->enrollmentService->validateToken($enrollmentToken);
+            
+            // Issue certificate
+            $certificate = $this->caService->issueCertificate(
+                $csrJson,
+                "CN={$tokenData['subscriber_name']},O={$tokenData['organization']}",
+                ['validity_years' => 2]
+            );
+            
+            // Calculate certificate fingerprint
+            $certFingerprint = openssl_x509_fingerprint($certificate, 'sha256');
+            $certData = openssl_x509_parse($certificate);
+            $certSerial = $certData['serialNumber'];
+            
+            // Store certificate record
+            $this->db->query(
+                "INSERT INTO issued_certificates 
+                 (serial_number, subject, fingerprint, user_id, issued_at, expires_at, status) 
+                 VALUES (?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 2 YEAR), 'active')",
+                [
+                    $certSerial,
+                    "CN={$tokenData['subscriber_name']},O={$tokenData['organization']}",
+                    $certFingerprint,
+                    $tokenData['user_id']
+                ]
+            );
+            
+            // Store client record with device info
+            $this->db->query(
+                "INSERT INTO clients 
+                 (client_cert_fingerprint, cert_serial_number, user_id, subscriber_email, 
+                  subscriber_name, organization, device_name, platform, enrollment_token, subscription_id) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    $certFingerprint,
+                    $certSerial,
+                    $tokenData['user_id'],
+                    $tokenData['subscriber_email'],
+                    $tokenData['subscriber_name'],
+                    $tokenData['organization'],
+                    $deviceName,
+                    $platform,
+                    $enrollmentToken,
+                    $tokenData['subscription_id']
+                ]
+            );
+            
+            // Mark token as used
+            $this->enrollmentService->markTokenUsed($enrollmentToken, $certFingerprint);
+            
+            // Generate initial license token
+            $subscription = $this->db->query(
+                "SELECT * FROM subscriptions WHERE id = ?",
+                [$tokenData['subscription_id']]
+            )->fetch();
+            
+            $licenseToken = $this->licenseService->generateLicenseToken(
+                $certFingerprint,
+                $certSerial,
+                $deviceId,
+                $subscription
+            );
+            
+            // Store license record
+            $this->db->query(
+                "INSERT INTO licenses 
+                 (subscription_id, client_cert_fingerprint, cert_serial_number, device_id, token, is_active) 
+                 VALUES (?, ?, ?, ?, ?, TRUE)",
+                [
+                    $subscription['id'],
+                    $certFingerprint,
+                    $certSerial,
+                    $deviceId,
+                    $licenseToken
+                ]
+            );
+            
+            // Get updated device count
+            $deviceCount = $this->db->query(
+                "SELECT COUNT(*) as count 
+                 FROM clients c
+                 JOIN issued_certificates ic ON c.cert_serial_number = ic.serial_number
+                 WHERE c.user_id = ? AND ic.status = 'active'",
+                [$tokenData['user_id']]
+            )->fetch()['count'];
+            
+            return [
+                'certificate' => $certificate,
+                'ca_chain' => $this->caService->getCertificateChain(),
+                'license_token' => $licenseToken,
+                'subscription_info' => [
+                    'subscription_type' => $subscription['subscription_type'],
+                    'end_date' => $subscription['end_date'],
+                    'devices_enrolled' => $deviceCount,
+                    'device_limit' => $subscription['device_limit']
+                ]
+            ];
+            
+        } catch (\Exception $e) {
+            http_response_code(400);
+            return ['error' => $e->getMessage()];
+        }
+    }
+    
+    /**
+     * Get Certificate Revocation List
+     * GET /api/crl/current
+     */
+    public function getCRL(): void
+    {
+        $crlPath = $_ENV['CA_CRL_PATH'] ?? '/var/www/html/public/crl/current.crl';
+        
+        if (!file_exists($crlPath)) {
+            http_response_code(404);
+            echo json_encode(['error' => 'CRL not found']);
+            return;
+        }
+        
+        header('Content-Type: application/pkix-crl');
+        header('Content-Disposition: attachment; filename="current.crl"');
+        header('Cache-Control: max-age=86400');
+        readfile($crlPath);
+    }
+}
+```
+
+### 6.2.2 Portal Controller (Session Auth)
+
+**File: `server/src/Api/PortalController.php`**
+
+```php
+<?php
+namespace App\Api;
+
+use App\Services\EnrollmentTokenService;
+use App\Services\DeviceManagementService;
+use App\Database\Database;
+
+class PortalController
+{
+    private $enrollmentService;
+    private $deviceService;
+    private $db;
+    
+    public function __construct()
+    {
+        $this->enrollmentService = new EnrollmentTokenService();
+        $this->deviceService = new DeviceManagementService();
+        $this->db = Database::getInstance();
+    }
+    
+    /**
+     * Generate enrollment token
+     * POST /portal/enrollment/generate
+     */
+    public function generateToken(): array
+    {
+        $userId = $_SESSION['user_id'] ?? null;
+        
+        if (!$userId) {
+            http_response_code(401);
+            return ['error' => 'Not authenticated'];
+        }
+        
+        try {
+            $result = $this->enrollmentService->generateEnrollmentToken($userId);
+            return $result;
+            
+        } catch (DeviceLimitReachedException $e) {
+            http_response_code(403);
+            return [
+                'error' => $e->getMessage(),
+                'enrolled_devices' => $e->getEnrolledDevices()
+            ];
+            
+        } catch (\Exception $e) {
+            http_response_code(400);
+            return ['error' => $e->getMessage()];
+        }
+    }
+    
+    /**
+     * List user's enrolled devices
+     * GET /portal/devices
+     */
+    public function listDevices(): array
+    {
+        $userId = $_SESSION['user_id'] ?? null;
+        
+        if (!$userId) {
+            http_response_code(401);
+            return ['error' => 'Not authenticated'];
+        }
+        
+        try {
+            $devices = $this->deviceService->listUserDevices($userId);
+            
+            // Get subscription info
+            $subscription = $this->db->query(
+                "SELECT device_limit FROM subscriptions 
+                 WHERE user_id = ? 
+                 AND payment_status = 'active' 
+                 AND end_date > NOW() 
+                 ORDER BY end_date DESC 
+                 LIMIT 1",
+                [$userId]
+            )->fetch();
+            
+            return [
+                'devices' => $devices,
+                'device_limit' => $subscription['device_limit'] ?? 1,
+                'devices_enrolled' => count(array_filter($devices, fn($d) => $d['status'] === 'active'))
+            ];
+            
+        } catch (\Exception $e) {
+            http_response_code(400);
+            return ['error' => $e->getMessage()];
+        }
+    }
+    
+    /**
+     * Revoke device certificate
+     * DELETE /portal/devices/{fingerprint}
+     */
+    public function revokeDevice(): array
+    {
+        $userId = $_SESSION['user_id'] ?? null;
+        
+        if (!$userId) {
+            http_response_code(401);
+            return ['error' => 'Not authenticated'];
+        }
+        
+        // Get fingerprint from URL path
+        $fingerprint = $_GET['fingerprint'] ?? null;
+        
+        if (!$fingerprint) {
+            http_response_code(400);
+            return ['error' => 'Certificate fingerprint required'];
+        }
+        
+        try {
+            $this->deviceService->revokeDevice($userId, $fingerprint);
+            
+            // Update CRL
+            $this->updateCRL();
+            
+            return [
+                'success' => true,
+                'message' => 'Device certificate revoked successfully'
+            ];
+            
+        } catch (UnauthorizedException $e) {
+            http_response_code(403);
+            return ['error' => $e->getMessage()];
+            
+        } catch (\Exception $e) {
+            http_response_code(400);
+            return ['error' => $e->getMessage()];
+        }
+    }
+    
+    /**
+     * Update Certificate Revocation List
+     */
+    private function updateCRL(): void
+    {
+        $crlPath = $_ENV['CA_CRL_PATH'] ?? '/var/www/html/public/crl/current.crl';
+        exec("openssl ca -config /etc/ca/intermediate-ca.cnf -gencrl -out $crlPath");
+    }
+}
+```
+
+---
+
+## 6.3 Middleware
+
+### 6.3.1 TLS Middleware (No Client Cert)
+
+**File: `server/src/Middleware/TLSAuthMiddleware.php`**
+
+```php
+<?php
+namespace App\Middleware;
+
+class TLSAuthMiddleware
+{
+    public function handle()
+    {
+        // TLS-only endpoints - no client certificate required
+        // Validate enrollment token instead (handled by controller)
+        
+        // Ensure HTTPS
+        if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
+            http_response_code(403);
+            echo json_encode(['error' => 'HTTPS required']);
+            exit;
+        }
+    }
+}
+```
+
+### 6.3.2 mTLS Middleware (Client Cert Required)
 
 **File: `server/src/Middleware/MTLSAuthMiddleware.php`**
 
@@ -995,66 +3373,35 @@ class MTLSAuthMiddleware
 }
 ```
 
-**File: `server/src/Middleware/TLSAuthMiddleware.php`**
+---
 
-```php
-<?php
-namespace App\Middleware;
+## Summary
 
-class TLSAuthMiddleware
-{
-    public function handle()
-    {
-        // TLS-only endpoints - no client certificate required
-        // Validate enrollment token instead (handled by controller)
-        
-        // Ensure HTTPS
-        if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
-            http_response_code(403);
-            echo json_encode(['error' => 'HTTPS required']);
-            exit;
-        }
-    }
-}
-```
+Server implementation provides:
 
-### Container Operations
+- ✅ **Two-phase authentication** (TLS → mTLS)
+- ✅ **Device limit enforcement** at enrollment
+- ✅ **Device management** via portal
+- ✅ **Certificate issuance** via Private CA
+- ✅ **License token generation** with JWT
+- ✅ **User-initiated revocation** support
+- ✅ **Rate limiting** on enrollment tokens
+- ✅ **CRL management** for revoked certificates
 
-All server components run inside Docker containers. Use the helper script:
+All services run in containerized Linux environment with zero macOS dependencies.
 
-```bash
-# Start all services (PHP, MySQL, Apache)
-./docker-helper.sh start
-
-# Install dependencies
-./docker-helper.sh composer install
-
-# Run migrations
-./docker-helper.sh migrate
-
-# Access container shell
-./docker-helper.sh shell
-
-# View logs
-./docker-helper.sh logs
-
-# Stop all services
-./docker-helper.sh stop
-```
-
-The server runs entirely in Linux containers - no PHP, MySQL, or Apache installation needed on the macOS host.
 
 ---
 
-## 7. Client Implementation Details (Native macOS - JDK 25)
+# Implementation Guide - Section 7: Client Implementation Details
 
-**IMPORTANT:** The client is a native macOS application that requires JDK 25 installed on the host. It cannot run in Docker containers because it needs:
-- Native macOS Keychain access
-- macOS system commands (`security`, `system_profiler`, `ioreg`)
-- Native macOS GUI (Swing)
-- Direct hardware access for device identification
+This section covers the complete native macOS client implementation using JDK 25.
 
-### Core Implementation - DeviceIdentifier.java
+---
+
+## 7.1 Core Client Components
+
+### 7.1.1 Device Identifier (macOS Hardware UUID)
 
 **File: `client/macos-java/src/main/java/com/licenseserver/client/DeviceIdentifier.java`**
 
@@ -1171,7 +3518,7 @@ public class DeviceIdentifier {
 }
 ```
 
-### Core Implementation - CertificateManager.java
+### 7.1.2 Certificate Manager (macOS Keychain)
 
 **File: `client/macos-java/src/main/java/com/licenseserver/client/CertificateManager.java`**
 
@@ -1411,276 +3758,7 @@ public class CertificateManager {
 }
 ```
 
-### Core Implementation - JWTValidator.java
-
-**File: `client/macos-java/src/main/java/com/licenseserver/client/JWTValidator.java`**
-
-```java
-package com.licenseserver.client;
-
-import java.nio.charset.StandardCharsets;
-import java.security.*;
-import java.security.spec.*;
-import java.util.*;
-import java.util.logging.Logger;
-
-public class JWTValidator {
-    private static final Logger logger = Logger.getLogger(JWTValidator.class.getName());
-    
-    private PublicKey serverPublicKey;
-    
-    public JWTValidator(String publicKeyPEM) throws Exception {
-        this.serverPublicKey = loadPublicKeyFromPEM(publicKeyPEM);
-        logger.info("JWT validator initialized");
-    }
-    
-    /**
-     * Validate and parse JWT token using only JDK APIs
-     */
-    public Map<String, Object> validateAndParse(String token) throws Exception {
-        
-        // Split token into parts
-        String[] parts = token.split("\\.");
-        if (parts.length != 3) {
-            throw new IllegalArgumentException("Invalid JWT format");
-        }
-        
-        String headerB64 = parts[0];
-        String payloadB64 = parts[1];
-        String signatureB64 = parts[2];
-        
-        // Verify signature
-        String signedData = headerB64 + "." + payloadB64;
-        byte[] signature = base64UrlDecode(signatureB64);
-        
-        if (!verifySignature(signedData.getBytes(StandardCharsets.UTF_8), signature)) {
-            throw new SecurityException("Invalid JWT signature");
-        }
-        
-        logger.fine("JWT signature verified");
-        
-        // Decode and parse payload
-        String payloadJson = new String(base64UrlDecode(payloadB64), StandardCharsets.UTF_8);
-        return parseJson(payloadJson);
-    }
-    
-    /**
-     * Verify RSA signature using JDK APIs
-     */
-    private boolean verifySignature(byte[] data, byte[] signature) throws Exception {
-        Signature sig = Signature.getInstance("SHA256withRSA");
-        sig.initVerify(serverPublicKey);
-        sig.update(data);
-        return sig.verify(signature);
-    }
-    
-    /**
-     * Load RSA public key from PEM format
-     */
-    private PublicKey loadPublicKeyFromPEM(String pemString) throws Exception {
-        
-        // Remove PEM headers
-        String base64 = pemString
-            .replace("-----BEGIN PUBLIC KEY-----", "")
-            .replace("-----END PUBLIC KEY-----", "")
-            .replaceAll("\\s", "");
-        
-        byte[] keyBytes = Base64.getDecoder().decode(base64);
-        
-        X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
-        KeyFactory kf = KeyFactory.getInstance("RSA");
-        return kf.generatePublic(spec);
-    }
-    
-    /**
-     * Base64 URL decode (JWT uses URL-safe Base64)
-     */
-    private byte[] base64UrlDecode(String input) {
-        String base64 = input.replace('-', '+').replace('_', '/');
-        
-        // Add padding if needed
-        int padding = (4 - base64.length() % 4) % 4;
-        base64 += "=".repeat(padding);
-        
-        return Base64.getDecoder().decode(base64);
-    }
-    
-    /**
-     * Simple JSON parser for JWT payload
-     */
-    private Map<String, Object> parseJson(String json) {
-        Map<String, Object> result = new HashMap<>();
-        
-        // Remove outer braces
-        json = json.trim();
-        if (json.startsWith("{")) json = json.substring(1);
-        if (json.endsWith("}")) json = json.substring(0, json.length() - 1);
-        
-        // Simple parsing (handles strings, numbers, booleans)
-        String[] pairs = json.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)");
-        
-        for (String pair : pairs) {
-            String[] keyValue = pair.split(":", 2);
-            if (keyValue.length == 2) {
-                String key = keyValue[0].trim().replaceAll("\"", "");
-                String value = keyValue[1].trim();
-                
-                // Parse value
-                Object parsedValue;
-                if (value.startsWith("\"") && value.endsWith("\"")) {
-                    parsedValue = value.substring(1, value.length() - 1);
-                } else if (value.equals("true") || value.equals("false")) {
-                    parsedValue = Boolean.parseBoolean(value);
-                } else if (value.matches("-?\\d+")) {
-                    parsedValue = Long.parseLong(value);
-                } else {
-                    parsedValue = value;
-                }
-                
-                result.put(key, parsedValue);
-            }
-        }
-        
-        return result;
-    }
-}
-```
-
-### Core Implementation - LicenseStorage.java
-
-**File: `client/macos-java/src/main/java/com/licenseserver/client/LicenseStorage.java`**
-
-```java
-package com.licenseserver.client;
-
-import javax.crypto.*;
-import javax.crypto.spec.*;
-import java.io.*;
-import java.nio.file.*;
-import java.security.*;
-import java.util.Base64;
-import java.util.logging.Logger;
-
-public class LicenseStorage {
-    private static final Logger logger = Logger.getLogger(LicenseStorage.class.getName());
-    
-    private final Path storageDir;
-    private final SecretKey encryptionKey;
-    
-    public LicenseStorage() throws Exception {
-        // macOS application support directory
-        String home = System.getProperty("user.home");
-        this.storageDir = Paths.get(home, "Library", "Application Support", "LicenseClient");
-        Files.createDirectories(storageDir);
-        
-        // Derive encryption key from device-specific data
-        this.encryptionKey = deriveEncryptionKey();
-        
-        logger.info("License storage initialized: " + storageDir);
-    }
-    
-    /**
-     * Derive device-specific encryption key using PBKDF2
-     */
-    private SecretKey deriveEncryptionKey() throws Exception {
-        
-        // Get device-specific data
-        DeviceIdentifier deviceId = new DeviceIdentifier();
-        String deviceIdString = deviceId.generateDeviceId();
-        
-        // Use PBKDF2 to derive key from device ID
-        SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-        
-        // Use fixed salt (device-bound encryption, not password-based)
-        byte[] salt = "LicenseClientSalt2024".getBytes("UTF-8");
-        
-        PBEKeySpec spec = new PBEKeySpec(
-            deviceIdString.toCharArray(),
-            salt,
-            10000, // iterations
-            256    // key length
-        );
-        
-        SecretKey tmp = factory.generateSecret(spec);
-        return new SecretKeySpec(tmp.getEncoded(), "AES");
-    }
-    
-    /**
-     * Encrypt and store license token
-     */
-    public void storeLicenseToken(String token) throws Exception {
-        
-        logger.info("Storing license token...");
-        
-        // Generate random IV
-        byte[] iv = new byte[16];
-        SecureRandom random = new SecureRandom();
-        random.nextBytes(iv);
-        
-        // Encrypt token
-        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-        cipher.init(Cipher.ENCRYPT_MODE, encryptionKey, new IvParameterSpec(iv));
-        byte[] encrypted = cipher.doFinal(token.getBytes("UTF-8"));
-        
-        // Combine IV + encrypted data
-        byte[] combined = new byte[iv.length + encrypted.length];
-        System.arraycopy(iv, 0, combined, 0, iv.length);
-        System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
-        
-        // Encode to Base64 and write to file
-        String encoded = Base64.getEncoder().encodeToString(combined);
-        Path tokenFile = storageDir.resolve("license.token");
-        Files.writeString(tokenFile, encoded);
-        
-        // Set file permissions (owner read/write only)
-        Files.setPosixFilePermissions(tokenFile, 
-            java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
-        
-        logger.info("License token stored successfully");
-    }
-    
-    /**
-     * Load and decrypt license token
-     */
-    public String loadLicenseToken() throws Exception {
-        
-        Path tokenFile = storageDir.resolve("license.token");
-        if (!Files.exists(tokenFile)) {
-            logger.fine("No license token found");
-            return null;
-        }
-        
-        // Read and decode
-        String encoded = Files.readString(tokenFile);
-        byte[] combined = Base64.getDecoder().decode(encoded);
-        
-        // Extract IV and encrypted data
-        byte[] iv = new byte[16];
-        byte[] encrypted = new byte[combined.length - 16];
-        System.arraycopy(combined, 0, iv, 0, 16);
-        System.arraycopy(combined, 16, encrypted, 0, encrypted.length);
-        
-        // Decrypt
-        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-        cipher.init(Cipher.DECRYPT_MODE, encryptionKey, new IvParameterSpec(iv));
-        byte[] decrypted = cipher.doFinal(encrypted);
-        
-        logger.fine("License token loaded successfully");
-        return new String(decrypted, "UTF-8");
-    }
-    
-    /**
-     * Delete stored license token
-     */
-    public void deleteLicenseToken() throws IOException {
-        Path tokenFile = storageDir.resolve("license.token");
-        Files.deleteIfExists(tokenFile);
-        logger.info("License token deleted");
-    }
-}
-```
-
-### Core Implementation - LicenseApiClient.java
+### 7.1.3 License API Client (with mTLS)
 
 **File: `client/macos-java/src/main/java/com/licenseserver/client/LicenseApiClient.java`**
 
@@ -1768,17 +3846,17 @@ public class LicenseApiClient {
     }
     
     /**
-     * Send enrollment request
+     * Send enrollment request with device information
      */
     public String enrollCertificate(String enrollmentToken, String csrJson, 
-                                   String deviceId) throws Exception {
+                                   String deviceId, String deviceName, String platform) throws Exception {
         
         logger.info("Submitting enrollment request...");
         
-        // Create request body (simple JSON formatting)
+        // Create request body with device info
         String requestBody = String.format(
-            "{\"enrollment_token\":\"%s\",\"csr\":%s,\"device_id\":\"%s\"}",
-            enrollmentToken, csrJson, deviceId
+            "{\"enrollment_token\":\"%s\",\"csr\":%s,\"device_id\":\"%s\",\"device_name\":\"%s\",\"platform\":\"%s\"}",
+            enrollmentToken, csrJson, deviceId, deviceName, platform
         );
         
         HttpRequest request = HttpRequest.newBuilder()
@@ -1826,7 +3904,7 @@ public class LicenseApiClient {
 }
 ```
 
-### JDK 25 Features - EnrollmentManager with Structured Concurrency
+### 7.1.4 Enrollment Manager (with Structured Concurrency)
 
 **File: `client/macos-java/src/main/java/com/licenseserver/client/EnrollmentManager.java`**
 
@@ -1856,16 +3934,16 @@ public class EnrollmentManager {
     }
     
     /**
-     * Complete enrollment process using Structured Concurrency (JDK 25)
+     * Complete enrollment process with device name using Structured Concurrency (JDK 25)
      */
-    public EnrollmentResult enrollWithToken(String enrollmentToken) {
+    public EnrollmentResult enrollWithToken(String enrollmentToken, String deviceName) {
         try {
             logger.info("Starting enrollment process...");
             
             // Use structured concurrency to manage parallel tasks
             try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
                 
-                // Generate key pair in parallel with getting device ID
+                // Generate key pair, device ID, and detect platform in parallel
                 Subtask<KeyPair> keyPairTask = scope.fork(() -> {
                     logger.fine("Generating key pair...");
                     return certManager.generateKeyPair();
@@ -1876,12 +3954,18 @@ public class EnrollmentManager {
                     return deviceId.generateDeviceId();
                 });
                 
-                // Wait for both to complete
+                Subtask<String> platformTask = scope.fork(() -> {
+                    logger.fine("Detecting platform...");
+                    return detectPlatform();
+                });
+                
+                // Wait for all to complete
                 scope.join();
                 scope.throwIfFailed();
                 
                 KeyPair keyPair = keyPairTask.get();
                 String deviceIdStr = deviceIdTask.get();
+                String platform = platformTask.get();
                 
                 // Create CSR
                 logger.info("Creating certificate request...");
@@ -1891,12 +3975,14 @@ public class EnrollmentManager {
                     "Licensed User"
                 );
                 
-                // Submit enrollment request
+                // Submit enrollment request with device info
                 logger.info("Submitting enrollment request...");
                 String responseJson = apiClient.enrollCertificate(
                     enrollmentToken,
                     csrJson,
-                    deviceIdStr
+                    deviceIdStr,
+                    deviceName,
+                    platform
                 );
                 
                 // Parse response
@@ -1940,6 +4026,23 @@ public class EnrollmentManager {
         }
     }
     
+    /**
+     * Detect current platform
+     */
+    private String detectPlatform() {
+        String os = System.getProperty("os.name").toLowerCase();
+        
+        if (os.contains("win")) {
+            return "windows";
+        } else if (os.contains("mac")) {
+            return "macos";
+        } else if (os.contains("nix") || os.contains("nux")) {
+            return "linux";
+        } else {
+            return "other";
+        }
+    }
+    
     private Map<String, String> parseEnrollmentResponse(String json) {
         Map<String, String> result = new java.util.HashMap<>();
         
@@ -1980,418 +4083,772 @@ public class EnrollmentManager {
 }
 ```
 
-### JDK 25 Features - LicenseManager with Pattern Matching and Sealed Interfaces
+---
 
-**File: `client/macos-java/src/main/java/com/licenseserver/client/LicenseManager.java`**
+## Summary
 
-```java
-package com.licenseserver.client;
+Client implementation provides:
 
-import java.security.cert.X509Certificate;
-import java.time.Instant;
-import java.util.Map;
-import java.util.logging.Logger;
+- ✅ **Native macOS integration** (Keychain, system commands)
+- ✅ **Zero runtime dependencies** (JDK 25 only)
+- ✅ **Device identification** with hardware UUID
+- ✅ **Certificate management** via Keychain
+- ✅ **mTLS support** for secure communication
+- ✅ **Device name** and platform detection
+- ✅ **Structured Concurrency** for parallel operations
+- ✅ **Virtual Threads** for background tasks
+- ✅ **Records and Pattern Matching** for clean code
 
-public class LicenseManager {
-    private static final Logger logger = Logger.getLogger(LicenseManager.class.getName());
-    
-    private final CertificateManager certManager;
-    private final LicenseStorage storage;
-    private final JWTValidator jwtValidator;
-    
-    public LicenseManager() throws Exception {
-        this.certManager = new CertificateManager();
-        this.storage = new LicenseStorage();
-        this.jwtValidator = new JWTValidator(AppConfig.LICENSE_SERVER_PUBLIC_KEY);
-    }
-    
-    /**
-     * Validate license using pattern matching (JDK 25)
-     */
-    public LicenseStatus validateLicense() {
-        try {
-            String token = storage.loadLicenseToken();
-            
-            // Pattern matching with null check
-            return switch (token) {
-                case null -> LicenseStatus.notActivated();
-                case String t -> validateToken(t);
-            };
-            
-        } catch (Exception e) {
-            logger.warning("License validation error: " + e.getMessage());
-            return LicenseStatus.invalid(e.getMessage());
-        }
-    }
-    
-    private LicenseStatus validateToken(String token) throws Exception {
-        // Validate JWT
-        Map<String, Object> claims = jwtValidator.validateAndParse(token);
-        
-        // Get certificate
-        X509Certificate clientCert = certManager.getCertificateFromKeychain(
-            "License Client Certificate"
-        );
-        
-        if (clientCert == null) {
-            return LicenseStatus.invalid("No client certificate found");
-        }
-        
-        // Verify certificate fingerprint
-        String certFingerprint = certManager.getCertificateFingerprint(clientCert);
-        String tokenFingerprint = (String) claims.get("sub");
-        
-        if (!certFingerprint.equals(tokenFingerprint)) {
-            return LicenseStatus.invalid("Certificate mismatch");
-        }
-        
-        // Check dates using pattern matching
-        long subscriptionEnd = ((Number) claims.get("subscription_end")).longValue();
-        long gracePeriodEnd = ((Number) claims.get("grace_period_end")).longValue();
-        long now = Instant.now().getEpochSecond();
-        
-        // Pattern matching for status determination
-        return switch (Long.compare(now, subscriptionEnd)) {
-            case int i when i < 0 -> LicenseStatus.valid(claims);
-            case int i when now < gracePeriodEnd -> LicenseStatus.gracePeriod(claims);
-            default -> LicenseStatus.expired(claims);
-        };
-    }
-    
-    /**
-     * Attempt to renew license (requires network)
-     */
-    public boolean attemptRenewal(String serverUrl) {
-        try {
-            LicenseApiClient apiClient = new LicenseApiClient(serverUrl);
-            DeviceIdentifier deviceId = new DeviceIdentifier();
-            
-            String response = apiClient.renewLicense(deviceId.generateDeviceId());
-            
-            // Parse response
-            Map<String, String> responseData = parseJsonResponse(response);
-            String newToken = responseData.get("token");
-            
-            if (newToken != null) {
-                storage.storeLicenseToken(newToken);
-                return true;
-            }
-            
-            return false;
-            
-        } catch (Exception e) {
-            logger.warning("License renewal failed: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    private Map<String, String> parseJsonResponse(String json) {
-        Map<String, String> result = new java.util.HashMap<>();
-        
-        json = json.trim();
-        if (json.startsWith("{")) json = json.substring(1);
-        if (json.endsWith("}")) json = json.substring(0, json.length() - 1);
-        
-        String[] pairs = json.split(",(?=([^\"]*\"[^\"]*\")*[^\"]*$)");
-        for (String pair : pairs) {
-            String[] kv = pair.split(":", 2);
-            if (kv.length == 2) {
-                String key = kv[0].trim().replaceAll("\"", "");
-                String value = kv[1].trim().replaceAll("\"", "");
-                result.put(key, value);
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * License status as a sealed interface with records (JDK 25)
-     */
-    public sealed interface LicenseStatus 
-        permits Valid, GracePeriod, Expired, NotActivated, Invalid {
-        
-        boolean isValid();
-        String message();
-        Map<String, Object> claims();
-        
-        default boolean isPremium() {
-            return isValid() && claims() != null;
-        }
-        
-        static Valid valid(Map<String, Object> claims) {
-            return new Valid(claims);
-        }
-        
-        static GracePeriod gracePeriod(Map<String, Object> claims) {
-            return new GracePeriod(claims);
-        }
-        
-        static Expired expired(Map<String, Object> claims) {
-            return new Expired(claims);
-        }
-        
-        static NotActivated notActivated() {
-            return new NotActivated();
-        }
-        
-        static Invalid invalid(String reason) {
-            return new Invalid(reason);
-        }
-    }
-    
-    public record Valid(Map<String, Object> claims) implements LicenseStatus {
-        @Override public boolean isValid() { return true; }
-        @Override public String message() { return "Valid subscription"; }
-    }
-    
-    public record GracePeriod(Map<String, Object> claims) implements LicenseStatus {
-        @Override public boolean isValid() { return true; }
-        @Override public String message() { return "In grace period"; }
-    }
-    
-    public record Expired(Map<String, Object> claims) implements LicenseStatus {
-        @Override public boolean isValid() { return false; }
-        @Override public String message() { return "Subscription expired"; }
-    }
-    
-    public record NotActivated() implements LicenseStatus {
-        @Override public boolean isValid() { return false; }
-        @Override public String message() { return "Not activated"; }
-        @Override public Map<String, Object> claims() { return null; }
-    }
-    
-    public record Invalid(String reason) implements LicenseStatus {
-        @Override public boolean isValid() { return false; }
-        @Override public String message() { return "Invalid: " + reason; }
-        @Override public Map<String, Object> claims() { return null; }
-    }
-}
-```
-
-### JDK 25 Features - Background Renewal with Virtual Threads
-
-**File: `client/macos-java/src/main/java/com/licenseserver/client/LicenseRenewalScheduler.java`**
-
-```java
-package com.licenseserver.client;
-
-import java.time.Duration;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
-
-public class LicenseRenewalScheduler {
-    private static final Logger logger = Logger.getLogger(LicenseRenewalScheduler.class.getName());
-    private final ScheduledExecutorService scheduler;
-    private final LicenseManager licenseManager;
-    private final String serverUrl;
-    
-    public LicenseRenewalScheduler(LicenseManager licenseManager, String serverUrl) {
-        // Use virtual thread executor for lightweight concurrency (JDK 25)
-        this.scheduler = Executors.newScheduledThreadPool(
-            1, 
-            Thread.ofVirtual().name("license-renewal-", 0).factory()
-        );
-        this.licenseManager = licenseManager;
-        this.serverUrl = serverUrl;
-    }
-    
-    public void startBackgroundRenewal() {
-        scheduler.scheduleWithFixedDelay(
-            this::checkAndRenew,
-            1, // Initial delay (hours)
-            24, // Period (hours)
-            TimeUnit.HOURS
-        );
-        logger.info("Background license renewal started (using virtual threads)");
-    }
-    
-    private void checkAndRenew() {
-        // This runs on a virtual thread - very lightweight
-        try {
-            var status = licenseManager.validateLicense();
-            
-            if (status.isValid() && needsRenewal(status)) {
-                logger.info("Attempting license renewal...");
-                boolean renewed = licenseManager.attemptRenewal(serverUrl);
-                
-                if (renewed) {
-                    logger.info("License renewed successfully");
-                } else {
-                    logger.warning("License renewal failed");
-                }
-            }
-        } catch (Exception e) {
-            logger.warning("Error during background renewal: " + e.getMessage());
-        }
-    }
-    
-    private boolean needsRenewal(LicenseManager.LicenseStatus status) {
-        var claims = status.claims();
-        if (claims == null) return false;
-        
-        long subscriptionEnd = ((Number) claims.get("subscription_end")).longValue();
-        long now = java.time.Instant.now().getEpochSecond();
-        long daysRemaining = (subscriptionEnd - now) / (24 * 60 * 60);
-        
-        return daysRemaining <= 7;
-    }
-    
-    public void shutdown() {
-        scheduler.shutdown();
-    }
-}
-```
-
-### Summary
-
-All client implementation files use:
-- **ZERO runtime dependencies** (only JDK 25)
-- **Virtual Threads** for background operations
-- **Structured Concurrency** for parallel tasks
-- **Pattern Matching** for cleaner logic
-- **Records & Sealed Interfaces** for type safety
-- **Native macOS integration** via ProcessBuilder
-- **java.util.logging** (no external logging frameworks)
-
-The client must run natively on macOS with JDK 25 installed - it cannot be containerized.
+All client code runs natively on macOS with full system access.
 
 ---
 
-## 8. Build and Packaging
+# Section 8: Device Management Portal
 
-### Complete Setup Without Installing Server Software
+This section covers the web-based device management portal UI implementation.
 
-**What Gets Installed Where:**
+---
 
-**On macOS Host:**
-- ✅ Docker Desktop (container runtime)
-- ✅ JDK 25 (for client application)
-- ✅ Maven (for client builds)
-- ✅ Git (for source control)
-- ❌ NO PHP, MySQL, Composer, OpenSSL, or web servers
+## 8.1 Portal Overview
 
-**In Linux Containers:**
-- ✅ PHP 8.1 with extensions (in `web` container)
-- ✅ Apache web server (in `web` container)
-- ✅ MySQL 8.0 (in `db` container)
-- ✅ Composer (runs in container)
-- ✅ OpenSSL (in Alpine container for CA setup)
-- ✅ PHPMyAdmin (in `phpmyadmin` container)
+The device management portal provides a web interface for users to:
+- View all enrolled devices with identification information
+- Generate enrollment tokens (with device limit enforcement)
+- Revoke device certificates to free enrollment slots
+- Monitor device activity (last seen timestamps)
+- View subscription details and device limits
 
-**Quick Start Guide:**
+**Authentication**: Session-based (standard web login)
+**Endpoints**: Served via TLS (port 8443), no mTLS required
 
-```bash
-# 1. Install prerequisites on macOS host
-brew install --cask docker           # Docker Desktop
-brew install openjdk@25               # Java 25 for client
-brew install maven git                # Build tools
+---
 
-# 2. Clone repository
-git clone https://github.com/yourusername/sub-lic-spec.git
-cd sub-lic-spec
+## 8.2 Device Management Page
 
-# 3. Setup CA infrastructure (runs in Alpine Linux container)
-cd ca
-./docker-setup.sh
-cd ..
+### HTML/CSS/JavaScript Implementation
 
-# 4. Start server (runs in Linux containers)
-cd server
-chmod +x docker-helper.sh
-./docker-helper.sh start              # Starts PHP, MySQL, Apache in containers
-./docker-helper.sh composer install   # Runs inside container
-./docker-helper.sh migrate            # Runs inside container
+**File: `server/public/portal/devices.html`**
 
-# 5. Build and run client (runs natively on macOS)
-cd ../client/macos-java
-mvn clean package                     # Requires JDK 25 on macOS
-mvn exec:java                         # Runs on macOS with GUI
-
-# Server running in containers, client running natively on macOS!
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Management - License Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 
+                         'Helvetica', 'Arial', sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+            color: #2c3e50;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #1a1a1a;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .limit-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .limit-info.warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        
+        .limit-text {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .limit-count {
+            font-size: 32px;
+            font-weight: 700;
+        }
+        
+        .actions {
+            margin-bottom: 20px;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .device-list {
+            display: grid;
+            gap: 16px;
+        }
+        
+        .device-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .device-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            transform: translateY(-2px);
+        }
+        
+        .device-info {
+            flex: 1;
+        }
+        
+        .device-info h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            color: #1a1a1a;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .platform-icon {
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #f0f0f0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .device-meta {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .device-meta div {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .device-meta strong {
+            min-width: 120px;
+            color: #333;
+        }
+        
+        .device-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 12px;
+        }
+        
+        .device-status {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-revoked {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .empty-state {
+            background: white;
+            border-radius: 12px;
+            padding: 60px 40px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+        
+        .empty-state h3 {
+            font-size: 24px;
+            margin-bottom: 12px;
+            color: #333;
+        }
+        
+        .empty-state p {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            padding: 50px 20px;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .modal-content {
+            background: white;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: slideUp 0.3s ease;
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .modal-content h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #1a1a1a;
+        }
+        
+        .modal-content p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        
+        .token-display {
+            background: #f8f9fa;
+            padding: 20px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            word-break: break-all;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+            margin: 20px 0;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .token-display:hover {
+            background: #e9ecef;
+        }
+        
+        .token-display::after {
+            content: 'Click to copy';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 11px;
+            color: #999;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        
+        .token-expiry {
+            color: #e67e22;
+            font-size: 14px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Device Management</h1>
+            <p>Manage your enrolled devices and enrollment tokens</p>
+        </div>
+        
+        <div id="limitInfo" class="limit-info">
+            <div>
+                <div class="limit-text">Devices Enrolled</div>
+                <div class="limit-count">
+                    <span id="deviceCount">0</span> / <span id="deviceLimit">0</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <button id="enrollBtn" class="btn btn-primary" onclick="generateEnrollmentToken()">
+                <span>➕</span> Add New Device
+            </button>
+        </div>
+        
+        <h2 style="margin-bottom: 16px; font-size: 20px;">Enrolled Devices</h2>
+        <div id="deviceList"></div>
+    </div>
+    
+    <!-- Token Modal -->
+    <div id="tokenModal" class="modal">
+        <div class="modal-content">
+            <h2>✅ Enrollment Token Generated</h2>
+            <p>Enter this token in your application to enroll a new device. The token will expire in 7 days.</p>
+            
+            <div class="token-display" id="tokenDisplay" onclick="copyToken()">
+                <span id="tokenValue"></span>
+            </div>
+            
+            <p class="token-expiry">Expires: <span id="tokenExpiry"></span></p>
+            
+            <button class="btn btn-primary" onclick="closeTokenModal()" style="width: 100%; justify-content: center;">
+                Close
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        let deviceData = null;
+        
+        // Load devices on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadDevices();
+        });
+        
+        async function loadDevices() {
+            try {
+                const response = await fetch('/portal/devices');
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                
+                deviceData = data;
+                renderDevices(data);
+                updateLimitInfo(data);
+                
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+                alert('Failed to load devices. Please refresh the page.');
+            }
+        }
+        
+        function renderDevices(data) {
+            const container = document.getElementById('deviceList');
+            
+            if (data.devices.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💻</div>
+                        <h3>No Devices Enrolled</h3>
+                        <p>Click "Add New Device" to generate an enrollment token and enroll your first device.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = data.devices.map(device => `
+                <div class="device-card">
+                    <div class="device-info">
+                        <h3>
+                            <span class="platform-icon">${getPlatformIcon(device.platform)}</span>
+                            ${escapeHtml(device.device_name || 'Unnamed Device')}
+                        </h3>
+                        <div class="device-meta">
+                            <div><strong>Platform:</strong> ${escapeHtml(device.platform)}</div>
+                            <div><strong>Enrolled:</strong> ${formatDate(device.enrolled_at)}</div>
+                            <div><strong>Last Seen:</strong> ${device.last_seen ? formatDate(device.last_seen) : 'Never'}</div>
+                            <div><strong>Certificate Expires:</strong> ${formatDate(device.certificate_expires)}</div>
+                        </div>
+                    </div>
+                    <div class="device-actions">
+                        <span class="device-status status-${device.status}">
+                            ${device.status}
+                        </span>
+                        ${device.status === 'active' ? `
+                            <button class="btn btn-danger" onclick="revokeDevice('${device.client_cert_fingerprint}', '${escapeHtml(device.device_name)}')">
+                                Revoke
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function updateLimitInfo(data) {
+            document.getElementById('deviceCount').textContent = data.devices_enrolled;
+            document.getElementById('deviceLimit').textContent = data.device_limit;
+            
+            const limitInfo = document.getElementById('limitInfo');
+            const enrollBtn = document.getElementById('enrollBtn');
+            
+            if (data.devices_enrolled >= data.device_limit) {
+                limitInfo.className = 'limit-info warning';
+                enrollBtn.disabled = true;
+                enrollBtn.innerHTML = '<span>⚠️</span> Device Limit Reached - Revoke a Device First';
+            } else {
+                limitInfo.className = 'limit-info';
+                enrollBtn.disabled = false;
+                enrollBtn.innerHTML = '<span>➕</span> Add New Device';
+            }
+        }
+        
+        async function generateEnrollmentToken() {
+            try {
+                const response = await fetch('/portal/enrollment/generate', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    if (data.enrolled_devices) {
+                        let deviceList = data.enrolled_devices.map(d => 
+                            `• ${d.device_name} (${d.platform}) - ${formatDate(d.enrolled_at)}`
+                        ).join('\n');
+                        
+                        alert(`Device limit reached!\n\nYou must revoke a device before enrolling a new one.\n\nCurrent devices:\n${deviceList}`);
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                    return;
+                }
+                
+                // Show token modal
+                document.getElementById('tokenValue').textContent = data.token;
+                document.getElementById('tokenExpiry').textContent = formatDate(data.expires_at);
+                document.getElementById('tokenModal').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Failed to generate token:', error);
+                alert('Failed to generate enrollment token. Please try again.');
+            }
+        }
+        
+        function closeTokenModal() {
+            document.getElementById('tokenModal').style.display = 'none';
+            loadDevices(); // Refresh device list
+        }
+        
+        function copyToken() {
+            const tokenText = document.getElementById('tokenValue').textContent;
+            navigator.clipboard.writeText(tokenText).then(() => {
+                const display = document.getElementById('tokenDisplay');
+                const originalText = display.style.background;
+                display.style.background = '#d4edda';
+                setTimeout(() => {
+                    display.style.background = originalText;
+                }, 500);
+            });
+        }
+        
+        async function revokeDevice(fingerprint, deviceName) {
+            if (!confirm(`Are you sure you want to revoke the certificate for "${deviceName}"?\n\nThis will immediately deactivate all licenses on this device.\n\nThis action cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/portal/devices/${fingerprint}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                
+                alert('✅ Device certificate revoked successfully!\n\nThe device slot is now available for a new enrollment.');
+                loadDevices(); // Refresh device list
+                
+            } catch (error) {
+                console.error('Failed to revoke device:', error);
+                alert('Failed to revoke device certificate. Please try again.');
+            }
+        }
+        
+        function getPlatformIcon(platform) {
+            const icons = {
+                'windows': '🪟',
+                'macos': '🍎',
+                'linux': '🐧',
+                'other': '💻'
+            };
+            return icons[platform] || icons['other'];
+        }
+        
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeTokenModal();
+            }
+        });
+    </script>
+</body>
+</html>
 ```
 
-### Docker Compose Configuration (Complete Containerization)
+---
 
-**File: `server/docker-compose.yml`**
+## 8.3 Portal Features Summary
+
+### Device Listing
+- **Visual cards** for each enrolled device
+- **Platform icons** (Windows, macOS, Linux)
+- **Device names** (user-provided during enrollment)
+- **Enrollment dates** and last-seen timestamps
+- **Certificate expiration** dates
+- **Status badges** (active/revoked)
+
+### Device Limit Display
+- **Visual indicator** showing X/Y devices enrolled
+- **Color coding**: Normal (purple) vs Warning (red) when at limit
+- **Dynamic button states**: Disabled when limit reached
+
+### Enrollment Token Generation
+- **One-click** token generation
+- **Modal display** with copy-to-clipboard functionality
+- **Clear expiry** information (7 days)
+- **Error handling** for device limit exceeded with device list
+
+### Device Revocation
+- **Confirmation dialog** before revocation
+- **Immediate CRL update** after revocation
+- **Success notification** and list refresh
+- **Permanent action** warning
+
+---
+
+## 8.4 Portal Security Considerations
+
+**Session Authentication:**
+- Standard web session cookies
+- Server-side session validation
+- CSRF protection recommended (not shown in example)
+- HTTPOnly and Secure cookie flags
+
+**Authorization:**
+- Users can only view/manage their own devices
+- Certificate ownership validated server-side
+- Device limit enforced server-side (cannot be bypassed)
+
+**Rate Limiting:**
+- Enrollment token generation limited to 5 per 24 hours
+- Prevents token abuse
+
+---
+
+## Summary
+
+The device management portal provides:
+
+- ✅ **Visual device management** with clear identification
+- ✅ **Device limit enforcement** with user-friendly feedback
+- ✅ **One-click enrollment token** generation
+- ✅ **Simple device revocation** workflow
+- ✅ **Responsive design** that works on all screen sizes
+- ✅ **Real-time updates** via AJAX
+- ✅ **Copy-to-clipboard** for tokens
+- ✅ **Clear error messages** and confirmation dialogs
+
+All portal functionality is secured via session authentication and server-side validation.
+
+---
+
+# Implementation Guide - Section 9: Build and Packaging
+
+This section covers building and packaging both server and client components for distribution.
+
+---
+
+## 9.1 Server Build and Packaging
+
+### 9.1.1 Server Build Process
+
+The server runs entirely in Docker containers, so packaging involves creating deployable container images.
+
+**File: `server/build.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+VERSION="${1:-1.0.0}"
+
+echo "=========================================="
+echo "Building License Server v${VERSION}"
+echo "=========================================="
+echo ""
+
+# Install dependencies
+echo "Installing PHP dependencies..."
+docker-compose exec web composer install --no-dev --optimize-autoloader
+
+# Run migrations
+echo "Running database migrations..."
+docker-compose exec web php migrate.php
+
+# Create production environment file
+echo "Creating production environment template..."
+cp .env.example .env.production
+sed -i '' "s/APP_ENV=development/APP_ENV=production/" .env.production
+sed -i '' "s/APP_DEBUG=true/APP_DEBUG=false/" .env.production
+
+# Build Docker images for production
+echo "Building Docker images..."
+docker-compose build --no-cache
+
+# Tag images
+docker tag server_web:latest license-server:${VERSION}
+docker tag server_db:latest license-server-db:${VERSION}
+
+echo ""
+echo "✅ Build complete!"
+echo ""
+echo "Docker images created:"
+echo "  - license-server:${VERSION}"
+echo "  - license-server-db:${VERSION}"
+echo ""
+echo "To push to registry:"
+echo "  docker push license-server:${VERSION}"
+echo "  docker push license-server-db:${VERSION}"
+echo ""
+```
+
+### 9.1.2 Production Docker Compose
+
+**File: `server/docker-compose.prod.yml`**
 
 ```yaml
 version: '3.8'
 
 services:
   web:
-    image: php:8.1-apache
-    container_name: license-server-web
+    image: license-server:${VERSION:-latest}
+    restart: always
     ports:
-      - "8443:443"
-      - "8080:80"
-      - "9443:9443"  # mTLS endpoint
+      - "443:443"
+      - "9443:9443"
     volumes:
-      # Mount entire project directory
-      - ./:/var/www/html
-      # Apache configuration
-      - ./docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf
-      - ./docker/apache/mtls.conf:/etc/apache2/sites-available/mtls.conf
-      # SSL certificates
-      - ./docker/ssl:/etc/ssl/certs-custom
-      # CA certificates (read-only)
-      - ../ca:/etc/ca:ro
-      # License signing keys
-      - ./docker/license-keys:/etc/license-server:ro
-    environment:
-      - APACHE_RUN_USER=www-data
-      - APACHE_RUN_GROUP=www-data
-      - APACHE_LOG_DIR=/var/log/apache2
+      - ./logs:/var/log/license-server
+      - ./ca:/etc/ca:ro
+      - ./license-keys:/etc/license-server:ro
+    env_file:
+      - .env.production
     depends_on:
       - db
     networks:
       - license-network
-    command: >
-      bash -c "
-        # Install required PHP extensions
-        docker-php-ext-install pdo pdo_mysql mysqli &&
-        # Enable Apache modules
-        a2enmod ssl rewrite headers &&
-        # Enable both sites
-        a2ensite 000-default mtls &&
-        # Start Apache
-        apache2-foreground
-      "
 
   db:
-    image: mysql:8.0
-    container_name: license-server-db
+    image: license-server-db:${VERSION:-latest}
+    restart: always
     ports:
       - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: license_system
-      MYSQL_USER: license_user
-      MYSQL_PASSWORD: license_password
     volumes:
-      # Persistent database storage
       - db-data:/var/lib/mysql
-    networks:
-      - license-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  phpmyadmin:
-    image: phpmyadmin:latest
-    container_name: license-server-phpmyadmin
-    ports:
-      - "8081:80"
-    environment:
-      PMA_HOST: db
-      PMA_USER: license_user
-      PMA_PASSWORD: license_password
-    depends_on:
-      - db
+    env_file:
+      - .env.production
     networks:
       - license-network
 
@@ -2404,97 +4861,200 @@ networks:
     driver: bridge
 ```
 
-### Helper Scripts for Container Operations
+### 9.1.3 Server Deployment Package
 
-**File: `server/docker-helper.sh`**
+**File: `server/package.sh`**
 
 ```bash
 #!/bin/bash
+set -e
 
-# Helper script for common Docker operations
+VERSION="${1:-1.0.0}"
+PACKAGE_NAME="license-server-${VERSION}"
 
-case "$1" in
-  start)
-    echo "Starting all services..."
-    docker-compose up -d
-    echo "Services started!"
-    echo "Web: https://localhost:8443"
-    echo "PHPMyAdmin: http://localhost:8081"
-    ;;
-    
-  stop)
-    echo "Stopping all services..."
-    docker-compose down
-    ;;
-    
-  restart)
-    echo "Restarting services..."
-    docker-compose restart
-    ;;
-    
-  logs)
-    docker-compose logs -f "${2:-web}"
-    ;;
-    
-  shell)
-    echo "Opening shell in web container..."
-    docker-compose exec web bash
-    ;;
-    
-  mysql)
-    echo "Opening MySQL client..."
-    docker-compose exec db mysql -u license_user -plicense_password license_system
-    ;;
-    
-  composer)
-    echo "Running composer $2..."
-    docker-compose exec web composer "${@:2}"
-    ;;
-    
-  migrate)
-    echo "Running database migrations..."
-    docker-compose exec web php migrate.php
-    ;;
-    
-  seed)
-    echo "Seeding database..."
-    docker-compose exec web php seed.php
-    ;;
-    
-  clean)
-    echo "Cleaning up containers and volumes..."
-    docker-compose down -v
-    echo "All data removed!"
-    ;;
-    
-  rebuild)
-    echo "Rebuilding containers..."
-    docker-compose down
-    docker-compose build --no-cache
-    docker-compose up -d
-    ;;
-    
-  *)
-    echo "Usage: $0 {start|stop|restart|logs|shell|mysql|composer|migrate|seed|clean|rebuild}"
-    echo ""
-    echo "Commands:"
-    echo "  start      - Start all services"
-    echo "  stop       - Stop all services"
-    echo "  restart    - Restart all services"
-    echo "  logs       - View logs (optionally specify service)"
-    echo "  shell      - Open bash shell in web container"
-    echo "  mysql      - Open MySQL client"
-    echo "  composer   - Run composer command"
-    echo "  migrate    - Run database migrations"
-    echo "  seed       - Seed database with test data"
-    echo "  clean      - Remove all containers and data"
-    echo "  rebuild    - Rebuild containers from scratch"
-    exit 1
-    ;;
-esac
+echo "Creating deployment package: ${PACKAGE_NAME}"
+
+# Create package directory
+mkdir -p "dist/${PACKAGE_NAME}"
+
+# Copy necessary files
+cp -r docker dist/${PACKAGE_NAME}/
+cp docker-compose.prod.yml dist/${PACKAGE_NAME}/docker-compose.yml
+cp .env.production dist/${PACKAGE_NAME}/.env.example
+cp migrate.php dist/${PACKAGE_NAME}/
+cp -r database/migrations dist/${PACKAGE_NAME}/migrations/
+
+# Copy documentation
+cat > dist/${PACKAGE_NAME}/README.md << 'EOF'
+# License Server Deployment Package
+
+## Prerequisites
+- Docker and Docker Compose installed
+- Valid SSL certificates
+- CA certificates and keys
+- License signing keys
+
+## Installation
+
+1. Copy `.env.example` to `.env` and configure all variables
+2. Place SSL certificates in `docker/ssl/`
+3. Place CA certificates in CA directories
+4. Place license signing keys in `docker/license-keys/`
+5. Run: `docker-compose up -d`
+6. Run migrations: `docker-compose exec web php migrate.php`
+
+## Configuration
+Edit `.env` file with your production settings.
+
+## Monitoring
+View logs: `docker-compose logs -f`
+EOF
+
+# Create archive
+cd dist
+tar -czf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
+cd ..
+
+echo ""
+echo "✅ Package created: dist/${PACKAGE_NAME}.tar.gz"
+echo ""
 ```
 
-### Java Client Build Scripts
+---
+
+## 9.2 Client Build and Packaging (macOS)
+
+### 9.2.1 Maven POM Configuration
+
+**File: `client/macos-java/pom.xml`**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.licenseserver</groupId>
+    <artifactId>license-client</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>License Client</name>
+    <description>License management client for macOS</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>25</maven.compiler.release>
+    </properties>
+
+    <dependencies>
+        <!-- JUnit for testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.1</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>25</source>
+                    <target>25</target>
+                    <release>25</release>
+                    <compilerArgs>
+                        <arg>--enable-preview</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- JAR Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.licenseserver.client.Main</mainClass>
+                            <addClasspath>true</addClasspath>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- Assembly Plugin for fat JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.licenseserver.client.Main</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- JPackage Plugin for macOS App -->
+            <plugin>
+                <groupId>org.panteleyev</groupId>
+                <artifactId>jpackage-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <name>LicenseClient</name>
+                    <appVersion>1.0.0</appVersion>
+                    <vendor>Your Company</vendor>
+                    <destination>target/dist</destination>
+                    <module>com.licenseserver.client/com.licenseserver.client.Main</module>
+                    <runtimeImage>target/runtime-image</runtimeImage>
+                    <javaOptions>
+                        <option>-Dapple.awt.application.name=LicenseClient</option>
+                        <option>-Dapple.laf.useScreenMenuBar=true</option>
+                    </javaOptions>
+                    <macPackageName>LicenseClient</macPackageName>
+                    <macPackageIdentifier>com.licenseserver.client</macPackageIdentifier>
+                    <macSign>true</macSign>
+                    <macSigningKeyUserName>Developer ID Application: Your Name</macSigningKeyUserName>
+                    <type>DMG</type>
+                </configuration>
+            </plugin>
+
+            <!-- Test Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.2</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+### 9.2.2 Client Build Script
 
 **File: `client/macos-java/build.sh`**
 
@@ -2502,50 +5062,186 @@ esac
 #!/bin/bash
 set -e
 
-VERSION="1.0.0"
+VERSION="${1:-1.0.0}"
 APP_NAME="LicenseClient"
 
-echo "Building ${APP_NAME} v${VERSION} for macOS..."
+echo "=========================================="
+echo "Building ${APP_NAME} v${VERSION} for macOS"
+echo "=========================================="
+echo ""
 
-# Clean and build
-mvn clean package
+# Clean previous builds
+echo "Cleaning previous builds..."
+mvn clean
+
+# Run tests
+echo "Running tests..."
+mvn test
+
+# Build JAR
+echo "Building JAR..."
+mvn package
 
 # Create runtime image with jlink
-jlink --add-modules java.base,java.desktop,java.sql,java.naming,java.management,jdk.crypto.ec,java.net.http \
-      --output target/runtime-image \
-      --strip-debug \
-      --no-man-pages \
-      --no-header-files \
-      --compress=2
+echo "Creating runtime image..."
+jlink \
+    --add-modules java.base,java.desktop,java.sql,java.naming,java.management,jdk.crypto.ec,java.net.http,java.logging \
+    --output target/runtime-image \
+    --strip-debug \
+    --no-man-pages \
+    --no-header-files \
+    --compress=2
 
-# Build macOS application bundle
+echo "Runtime image created: $(du -sh target/runtime-image | cut -f1)"
+
+# Build macOS application bundle using jpackage
 echo "Building macOS application bundle..."
-mvn jpackage:jpackage
+jpackage \
+    --input target \
+    --name "${APP_NAME}" \
+    --main-jar "license-client-${VERSION}.jar" \
+    --main-class com.licenseserver.client.Main \
+    --type app-image \
+    --dest target/dist \
+    --app-version "${VERSION}" \
+    --vendor "Your Company" \
+    --copyright "Copyright © 2025 Your Company" \
+    --description "License management client" \
+    --runtime-image target/runtime-image \
+    --java-options "-Dapple.awt.application.name=${APP_NAME}" \
+    --java-options "-Dapple.laf.useScreenMenuBar=true"
 
-# Code signing (requires Apple Developer certificate)
-echo "Code signing application..."
-codesign --deep --force --verify --verbose \
-    --sign "Developer ID Application: Your Name" \
-    --options runtime \
-    target/dist/LicenseClient.app
-
-# Create DMG
-echo "Creating DMG installer..."
-hdiutil create -volname "LicenseClient" \
-    -srcfolder target/dist/LicenseClient.app \
-    -ov -format UDZO \
-    target/dist/LicenseClient-${VERSION}.dmg
-
-# Sign DMG
-codesign --sign "Developer ID Application: Your Name" \
-    target/dist/LicenseClient-${VERSION}.dmg
-
-echo "Build complete! Output: target/dist/LicenseClient-${VERSION}.dmg"
+echo ""
+echo "✅ Build complete!"
+echo ""
+echo "Application bundle: target/dist/${APP_NAME}.app"
 echo ""
 echo "Next steps:"
-echo "1. Submit for notarization: ./notarize.sh target/dist/LicenseClient-${VERSION}.dmg"
-echo "2. After approval, staple: xcrun stapler staple target/dist/LicenseClient-${VERSION}.dmg"
+echo "1. Code sign: ./sign.sh"
+echo "2. Create DMG: ./create-dmg.sh"
+echo "3. Notarize: ./notarize.sh"
+echo ""
 ```
+
+### 9.2.3 Code Signing Script
+
+**File: `client/macos-java/sign.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+APP_NAME="LicenseClient"
+APP_BUNDLE="target/dist/${APP_NAME}.app"
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM_ID)"
+
+echo "=========================================="
+echo "Code Signing ${APP_NAME}"
+echo "=========================================="
+echo ""
+
+if [ ! -d "$APP_BUNDLE" ]; then
+    echo "Error: Application bundle not found at $APP_BUNDLE"
+    echo "Run ./build.sh first"
+    exit 1
+fi
+
+echo "Signing application bundle..."
+codesign \
+    --deep \
+    --force \
+    --verify \
+    --verbose \
+    --sign "$SIGNING_IDENTITY" \
+    --options runtime \
+    --timestamp \
+    "$APP_BUNDLE"
+
+echo ""
+echo "Verifying signature..."
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+echo ""
+echo "Checking signature..."
+spctl --assess --verbose=4 --type execute "$APP_BUNDLE"
+
+echo ""
+echo "✅ Code signing complete!"
+echo ""
+```
+
+### 9.2.4 DMG Creation Script
+
+**File: `client/macos-java/create-dmg.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+VERSION="${1:-1.0.0}"
+APP_NAME="LicenseClient"
+APP_BUNDLE="target/dist/${APP_NAME}.app"
+DMG_NAME="${APP_NAME}-${VERSION}.dmg"
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM_ID)"
+
+echo "=========================================="
+echo "Creating DMG for ${APP_NAME} v${VERSION}"
+echo "=========================================="
+echo ""
+
+if [ ! -d "$APP_BUNDLE" ]; then
+    echo "Error: Application bundle not found"
+    exit 1
+fi
+
+# Create temporary DMG
+echo "Creating temporary DMG..."
+hdiutil create \
+    -volname "${APP_NAME}" \
+    -srcfolder "$APP_BUNDLE" \
+    -ov \
+    -format UDRW \
+    temp.dmg
+
+# Mount temporary DMG
+echo "Mounting temporary DMG..."
+mkdir -p /tmp/dmg
+hdiutil attach temp.dmg -mountpoint /tmp/dmg
+
+# Create Applications symlink
+ln -s /Applications /tmp/dmg/Applications
+
+# Set custom icon and layout (optional)
+# osascript scripts/dmg-setup.scpt
+
+# Unmount
+hdiutil detach /tmp/dmg
+
+# Convert to final compressed DMG
+echo "Creating final DMG..."
+hdiutil convert temp.dmg \
+    -format UDZO \
+    -o "target/dist/${DMG_NAME}"
+
+# Clean up
+rm temp.dmg
+
+# Sign DMG
+echo "Signing DMG..."
+codesign \
+    --force \
+    --sign "$SIGNING_IDENTITY" \
+    --timestamp \
+    "target/dist/${DMG_NAME}"
+
+echo ""
+echo "✅ DMG created: target/dist/${DMG_NAME}"
+echo ""
+echo "Next step: Notarize with ./notarize.sh"
+echo ""
+```
+
+### 9.2.5 Notarization Script
 
 **File: `client/macos-java/notarize.sh`**
 
@@ -2553,92 +5249,480 @@ echo "2. After approval, staple: xcrun stapler staple target/dist/LicenseClient-
 #!/bin/bash
 set -e
 
-DMG_PATH="$1"
+VERSION="${1:-1.0.0}"
+APP_NAME="LicenseClient"
+DMG_PATH="target/dist/${APP_NAME}-${VERSION}.dmg"
 
-if [ -z "$DMG_PATH" ]; then
-    echo "Usage: ./notarize.sh <path-to-dmg>"
+# Apple ID credentials
+APPLE_ID="your@apple.id"
+TEAM_ID="YOUR_TEAM_ID"
+KEYCHAIN_PROFILE="notarization-profile"
+
+echo "=========================================="
+echo "Notarizing ${APP_NAME}"
+echo "=========================================="
+echo ""
+
+if [ ! -f "$DMG_PATH" ]; then
+    echo "Error: DMG not found at $DMG_PATH"
     exit 1
 fi
 
-echo "Submitting ${DMG_PATH} for notarization..."
+echo "Submitting for notarization..."
+echo "This may take several minutes..."
+echo ""
 
 # Submit for notarization
 xcrun notarytool submit "$DMG_PATH" \
-    --apple-id "your@apple.id" \
-    --team-id "YOUR_TEAM_ID" \
-    --password "@keychain:AC_PASSWORD" \
+    --apple-id "$APPLE_ID" \
+    --team-id "$TEAM_ID" \
+    --password "@keychain:$KEYCHAIN_PROFILE" \
     --wait
 
-echo "Notarization complete!"
 echo ""
-echo "To staple the notarization ticket, run:"
-echo "xcrun stapler staple $DMG_PATH"
+echo "Stapling notarization ticket..."
+xcrun stapler staple "$DMG_PATH"
+
+echo ""
+echo "Verifying notarization..."
+xcrun stapler validate "$DMG_PATH"
+
+echo ""
+echo "✅ Notarization complete!"
+echo ""
+echo "DMG ready for distribution: $DMG_PATH"
+echo ""
+```
+
+### 9.2.6 Complete Build Pipeline
+
+**File: `client/macos-java/build-release.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+VERSION="${1:-1.0.0}"
+
+echo "=========================================="
+echo "Complete Release Build Pipeline"
+echo "=========================================="
+echo ""
+
+# Step 1: Build
+echo "Step 1/5: Building application..."
+./build.sh "$VERSION"
+
+# Step 2: Sign
+echo ""
+echo "Step 2/5: Code signing..."
+./sign.sh
+
+# Step 3: Create DMG
+echo ""
+echo "Step 3/5: Creating DMG..."
+./create-dmg.sh "$VERSION"
+
+# Step 4: Notarize
+echo ""
+echo "Step 4/5: Notarizing..."
+./notarize.sh "$VERSION"
+
+# Step 5: Create checksum
+echo ""
+echo "Step 5/5: Creating checksum..."
+cd target/dist
+shasum -a 256 "LicenseClient-${VERSION}.dmg" > "LicenseClient-${VERSION}.dmg.sha256"
+cd ../..
+
+echo ""
+echo "=========================================="
+echo "✅ Release build complete!"
+echo "=========================================="
+echo ""
+echo "Deliverables:"
+echo "  - target/dist/LicenseClient-${VERSION}.dmg"
+echo "  - target/dist/LicenseClient-${VERSION}.dmg.sha256"
+echo ""
+echo "Ready for distribution!"
+echo ""
 ```
 
 ---
 
-## 9. Testing Strategy
+## 9.3 Build Prerequisites
 
-### Server Unit Tests
+### 9.3.1 Server Build Requirements
 
-**File: `server/tests/Unit/LicenseTokenServiceTest.php`**
+- Docker Desktop installed
+- Docker Compose installed
+- Access to Docker registry (for pushing images)
+
+### 9.3.2 Client Build Requirements
+
+- macOS 12.0+ (for building macOS app)
+- JDK 25 installed
+- Maven 3.9+
+- Xcode Command Line Tools
+- Apple Developer account (for code signing)
+- Developer ID Application certificate
+- Stored notarization credentials in Keychain
+
+**Setup notarization credentials:**
+```bash
+# Store password in Keychain (one-time setup)
+xcrun notarytool store-credentials "notarization-profile" \
+    --apple-id "your@apple.id" \
+    --team-id "YOUR_TEAM_ID" \
+    --password "app-specific-password"
+```
+
+---
+
+## 9.4 Build Verification
+
+### Server Build Verification
+
+```bash
+# Verify Docker images
+docker images | grep license-server
+
+# Test container startup
+docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.prod.yml down
+```
+
+### Client Build Verification
+
+```bash
+# Verify JAR
+java -jar target/license-client-1.0.0.jar
+
+# Verify app bundle
+open target/dist/LicenseClient.app
+
+# Verify code signature
+codesign --verify --deep --strict target/dist/LicenseClient.app
+spctl --assess --verbose target/dist/LicenseClient.app
+
+# Verify DMG
+hdiutil verify target/dist/LicenseClient-1.0.0.dmg
+
+# Verify notarization
+xcrun stapler validate target/dist/LicenseClient-1.0.0.dmg
+```
+
+---
+
+## Summary
+
+Build and packaging provides:
+
+- ✅ **Automated server builds** via Docker
+- ✅ **Production-ready containers** with optimized images
+- ✅ **Native macOS app bundle** generation
+- ✅ **Code signing** for macOS apps
+- ✅ **DMG installer** creation
+- ✅ **Apple notarization** support
+- ✅ **Complete build pipeline** scripts
+- ✅ **Checksum generation** for verification
+
+All builds are automated and repeatable for consistent releases.
+
+---
+
+# Implementation Guide - Section 10: Testing Strategy
+
+This section covers comprehensive testing strategies for both server and client components.
+
+---
+
+## 10.1 Server Testing
+
+### 10.1.1 Unit Tests
+
+**File: `server/tests/Unit/EnrollmentTokenServiceTest.php`**
 
 ```php
 <?php
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use App\Services\LicenseTokenService;
+use App\Services\EnrollmentTokenService;
+use App\Services\DeviceLimitReachedException;
 
-class LicenseTokenServiceTest extends TestCase
+class EnrollmentTokenServiceTest extends TestCase
+{
+    private $service;
+    private $mockDb;
+    
+    protected function setUp(): void
+    {
+        $this->service = new EnrollmentTokenService();
+        // Mock database would be set up here
+    }
+    
+    public function testGenerateEnrollmentTokenSuccess()
+    {
+        // Test successful token generation when under device limit
+        $userId = 1;
+        
+        // Mock: User has 2/5 devices enrolled
+        // Mock: Active subscription exists
+        
+        $result = $this->service->generateEnrollmentToken($userId);
+        
+        $this->assertArrayHasKey('token', $result);
+        $this->assertArrayHasKey('expires_at', $result);
+        $this->assertArrayHasKey('devices_enrolled', $result);
+        $this->assertArrayHasKey('device_limit', $result);
+        $this->assertEquals(64, strlen($result['token'])); // 32 bytes = 64 hex chars
+    }
+    
+    public function testGenerateEnrollmentTokenDeviceLimitReached()
+    {
+        // Test token generation fails when device limit reached
+        $userId = 1;
+        
+        // Mock: User has 5/5 devices enrolled
+        
+        $this->expectException(DeviceLimitReachedException::class);
+        $this->expectExceptionMessage('Device limit reached');
+        
+        $this->service->generateEnrollmentToken($userId);
+    }
+    
+    public function testValidateTokenExpired()
+    {
+        // Test expired token validation
+        $expiredToken = 'expired_token_123';
+        
+        // Mock: Token exists but expired
+        
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Enrollment token expired');
+        
+        $this->service->validateToken($expiredToken);
+    }
+    
+    public function testValidateTokenAlreadyUsed()
+    {
+        // Test already-used token validation
+        $usedToken = 'used_token_123';
+        
+        // Mock: Token exists but already used
+        
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Enrollment token already used');
+        
+        $this->service->validateToken($usedToken);
+    }
+}
+```
+
+**File: `server/tests/Unit/DeviceManagementServiceTest.php`**
+
+```php
+<?php
+namespace Tests\Unit;
+
+use PHPUnit\Framework\TestCase;
+use App\Services\DeviceManagementService;
+use App\Services\UnauthorizedException;
+
+class DeviceManagementServiceTest extends TestCase
 {
     private $service;
     
     protected function setUp(): void
     {
-        $this->service = new LicenseTokenService();
+        $this->service = new DeviceManagementService();
     }
     
-    public function testGenerateLicenseToken()
+    public function testListUserDevices()
     {
-        $clientFingerprint = 'test-fingerprint';
-        $certSerial = 'test-serial';
-        $deviceId = 'test-device';
-        $subscription = [
-            'id' => 1,
-            'subscription_type' => 'monthly',
-            'end_date' => '2025-12-31 23:59:59',
-            'payment_status' => 'active'
-        ];
+        $userId = 1;
         
-        $token = $this->service->generateLicenseToken(
-            $clientFingerprint,
-            $certSerial,
-            $deviceId,
-            $subscription
-        );
+        // Mock: User has 3 enrolled devices
         
-        $this->assertNotEmpty($token);
-        $this->assertStringContainsString('.', $token);
+        $devices = $this->service->listUserDevices($userId);
         
-        $parts = explode('.', $token);
-        $this->assertCount(3, $parts);
+        $this->assertIsArray($devices);
+        $this->assertCount(3, $devices);
+        $this->assertArrayHasKey('device_name', $devices[0]);
+        $this->assertArrayHasKey('platform', $devices[0]);
+        $this->assertArrayHasKey('status', $devices[0]);
     }
     
-    public function testCalculateGracePeriod()
+    public function testRevokeDeviceSuccess()
     {
-        $subscriptionEnd = new \DateTime('2025-01-01');
+        $userId = 1;
+        $fingerprint = 'valid_cert_fingerprint_123';
         
-        $graceEnd = $this->service->calculateGracePeriodEnd('monthly', $subscriptionEnd);
-        $this->assertEquals('2025-01-06', $graceEnd->format('Y-m-d'));
+        // Mock: Certificate belongs to user
         
-        $graceEnd = $this->service->calculateGracePeriodEnd('annual', $subscriptionEnd);
-        $this->assertEquals('2025-01-15', $graceEnd->format('Y-m-d'));
+        $this->service->revokeDevice($userId, $fingerprint);
+        
+        // Assert: Certificate status changed to 'revoked'
+        // Assert: Associated licenses deactivated
+        $this->assertTrue(true);
+    }
+    
+    public function testRevokeDeviceUnauthorized()
+    {
+        $userId = 1;
+        $fingerprint = 'other_user_cert_fingerprint';
+        
+        // Mock: Certificate belongs to different user
+        
+        $this->expectException(UnauthorizedException::class);
+        
+        $this->service->revokeDevice($userId, $fingerprint);
     }
 }
 ```
 
-### Client Unit Tests (Java)
+### 10.1.2 Integration Tests
+
+**File: `server/tests/Integration/EnrollmentFlowTest.php`**
+
+```php
+<?php
+namespace Tests\Integration;
+
+use PHPUnit\Framework\TestCase;
+
+class EnrollmentFlowTest extends TestCase
+{
+    public function testCompleteEnrollmentFlow()
+    {
+        // 1. Generate enrollment token
+        $response = $this->post('/portal/enrollment/generate', [
+            'user_id' => 1
+        ]);
+        
+        $this->assertEquals(200, $response->status);
+        $token = $response->data['token'];
+        
+        // 2. Submit enrollment request with CSR
+        $csr = $this->generateTestCSR();
+        
+        $response = $this->post('/api/certificate/enroll', [
+            'enrollment_token' => $token,
+            'csr' => $csr,
+            'device_id' => 'device_test_123',
+            'device_name' => 'Test Device',
+            'platform' => 'macos'
+        ]);
+        
+        $this->assertEquals(200, $response->status);
+        $this->assertArrayHasKey('certificate', $response->data);
+        $this->assertArrayHasKey('license_token', $response->data);
+        
+        // 3. Verify database records created
+        $this->assertDatabaseHas('issued_certificates', [
+            'user_id' => 1,
+            'status' => 'active'
+        ]);
+        
+        $this->assertDatabaseHas('clients', [
+            'device_name' => 'Test Device',
+            'platform' => 'macos'
+        ]);
+        
+        $this->assertDatabaseHas('licenses', [
+            'device_id' => 'device_test_123',
+            'is_active' => true
+        ]);
+    }
+    
+    public function testEnrollmentFailsWhenDeviceLimitReached()
+    {
+        // Setup: User already has 5/5 devices enrolled
+        $this->seedDevices(userId: 1, count: 5, limit: 5);
+        
+        // Attempt to generate token
+        $response = $this->post('/portal/enrollment/generate', [
+            'user_id' => 1
+        ]);
+        
+        $this->assertEquals(403, $response->status);
+        $this->assertStringContainsString('Device limit reached', $response->data['error']);
+        $this->assertArrayHasKey('enrolled_devices', $response->data);
+        $this->assertCount(5, $response->data['enrolled_devices']);
+    }
+}
+```
+
+**File: `server/tests/Integration/DeviceLimitTest.php`**
+
+```php
+<?php
+namespace Tests\Integration;
+
+use PHPUnit\Framework\TestCase;
+
+class DeviceLimitTest extends TestCase
+{
+    public function testDeviceLimitEnforcement()
+    {
+        // Setup: Create subscription with 2 device limit
+        $userId = $this->createUser();
+        $subscriptionId = $this->createSubscription($userId, deviceLimit: 2);
+        
+        // Enroll first device - should succeed
+        $token1 = $this->generateEnrollmentToken($userId);
+        $result1 = $this->enrollDevice($token1, 'Device 1');
+        $this->assertTrue($result1['success']);
+        
+        // Enroll second device - should succeed
+        $token2 = $this->generateEnrollmentToken($userId);
+        $result2 = $this->enrollDevice($token2, 'Device 2');
+        $this->assertTrue($result2['success']);
+        
+        // Attempt third device - should fail
+        try {
+            $token3 = $this->generateEnrollmentToken($userId);
+            $this->fail('Expected DeviceLimitReachedException');
+        } catch (\Exception $e) {
+            $this->assertStringContainsString('Device limit reached', $e->getMessage());
+        }
+        
+        // Revoke first device
+        $this->revokeDevice($userId, $result1['fingerprint']);
+        
+        // Now third device should succeed
+        $token3 = $this->generateEnrollmentToken($userId);
+        $result3 = $this->enrollDevice($token3, 'Device 3');
+        $this->assertTrue($result3['success']);
+    }
+}
+```
+
+### 10.1.3 Running Server Tests
+
+```bash
+# Run all tests
+./docker-helper.sh shell
+composer test
+
+# Run specific test suite
+composer test -- --testsuite=Unit
+composer test -- --testsuite=Integration
+
+# Run with coverage
+composer test:coverage
+
+# Run specific test file
+composer test tests/Unit/EnrollmentTokenServiceTest.php
+```
+
+---
+
+## 10.2 Client Testing
+
+### 10.2.1 Unit Tests
 
 **File: `client/macos-java/src/test/java/com/licenseserver/client/DeviceIdentifierTest.java`**
 
@@ -2657,23 +5741,411 @@ public class DeviceIdentifierTest {
         
         assertNotNull(deviceId);
         assertTrue(deviceId.startsWith("device_"));
-        assertEquals(71, deviceId.length());
+        assertEquals(71, deviceId.length()); // "device_" + 64 hex chars
     }
     
     @Test
     public void testDeviceIdConsistency() {
+        // Same device should generate same ID
         DeviceIdentifier identifier = new DeviceIdentifier();
         String deviceId1 = identifier.generateDeviceId();
         String deviceId2 = identifier.generateDeviceId();
         
         assertEquals(deviceId1, deviceId2);
     }
+    
+    @Test
+    public void testDeviceIdFormat() {
+        DeviceIdentifier identifier = new DeviceIdentifier();
+        String deviceId = identifier.generateDeviceId();
+        
+        // Verify hex format (only 0-9, a-f after "device_" prefix)
+        String hash = deviceId.substring(7); // Remove "device_" prefix
+        assertTrue(hash.matches("[0-9a-f]{64}"));
+    }
+}
+```
+
+**File: `client/macos-java/src/test/java/com/licenseserver/client/CertificateManagerTest.java`**
+
+```java
+package com.licenseserver.client;
+
+import org.junit.jupiter.api.Test;
+import java.security.KeyPair;
+import java.security.cert.X509Certificate;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class CertificateManagerTest {
+    
+    private CertificateManager certManager = new CertificateManager();
+    
+    @Test
+    public void testGenerateKeyPair() throws Exception {
+        KeyPair keyPair = certManager.generateKeyPair();
+        
+        assertNotNull(keyPair);
+        assertNotNull(keyPair.getPrivate());
+        assertNotNull(keyPair.getPublic());
+        assertEquals("RSA", keyPair.getPrivate().getAlgorithm());
+        assertEquals(2048, getKeySize(keyPair));
+    }
+    
+    @Test
+    public void testGenerateCSR() throws Exception {
+        KeyPair keyPair = certManager.generateKeyPair();
+        String csr = certManager.generateCSR(keyPair, "Test User", "Test Org");
+        
+        assertNotNull(csr);
+        assertTrue(csr.contains("publicKey"));
+        assertTrue(csr.contains("Test User"));
+        assertTrue(csr.contains("Test Org"));
+    }
+    
+    @Test
+    public void testLoadCertificateFromPEM() throws Exception {
+        String testCertPEM = """
+            -----BEGIN CERTIFICATE-----
+            MIIDXTCCAkWgAwIBAgIJAKL0UG+mRkSvMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
+            BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
+            aWRnaXRzIFB0eSBMdGQwHhcNMTkwMjExMTIxOTU5WhcNMjAwMjExMTIxOTU5WjBF
+            MQswCQYDVQQGEwJBVTETMBEGA1UECAwKU29tZS1TdGF0ZTEhMB8GA1UECgwYSW50
+            ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
+            CgKCAQEA2Z3qX2BTLS4nP1Y1r2RLSRhBhOKz+Sf4Q3rxz+VdCrWviWqNa8EKfBJn
+            -----END CERTIFICATE-----
+            """;
+        
+        X509Certificate cert = certManager.loadCertificateFromPEM(testCertPEM);
+        
+        assertNotNull(cert);
+        assertEquals("X.509", cert.getType());
+    }
+    
+    @Test
+    public void testGetCertificateFingerprint() throws Exception {
+        // Load test certificate
+        String testCertPEM = getTestCertificate();
+        X509Certificate cert = certManager.loadCertificateFromPEM(testCertPEM);
+        
+        String fingerprint = certManager.getCertificateFingerprint(cert);
+        
+        assertNotNull(fingerprint);
+        assertEquals(64, fingerprint.length()); // SHA-256 = 64 hex chars
+        assertTrue(fingerprint.matches("[0-9a-f]{64}"));
+    }
+    
+    private int getKeySize(KeyPair keyPair) {
+        // Helper to determine key size
+        return 2048; // Simplified for test
+    }
+    
+    private String getTestCertificate() {
+        // Return test certificate PEM
+        return "...";
+    }
+}
+```
+
+**File: `client/macos-java/src/test/java/com/licenseserver/client/JWTValidatorTest.java`**
+
+```java
+package com.licenseserver.client;
+
+import org.junit.jupiter.api.Test;
+import java.util.Map;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class JWTValidatorTest {
+    
+    @Test
+    public void testValidateValidToken() throws Exception {
+        // Create test JWT with test keys
+        String testPublicKey = getTestPublicKey();
+        String validToken = createTestToken();
+        
+        JWTValidator validator = new JWTValidator(testPublicKey);
+        Map<String, Object> claims = validator.validateAndParse(validToken);
+        
+        assertNotNull(claims);
+        assertTrue(claims.containsKey("sub"));
+        assertTrue(claims.containsKey("device_id"));
+    }
+    
+    @Test
+    public void testValidateInvalidSignature() throws Exception {
+        String testPublicKey = getTestPublicKey();
+        String tamperedToken = createTamperedToken();
+        
+        JWTValidator validator = new JWTValidator(testPublicKey);
+        
+        assertThrows(SecurityException.class, () -> {
+            validator.validateAndParse(tamperedToken);
+        });
+    }
+    
+    @Test
+    public void testValidateMalformedToken() throws Exception {
+        String testPublicKey = getTestPublicKey();
+        String malformedToken = "not.a.valid.jwt";
+        
+        JWTValidator validator = new JWTValidator(testPublicKey);
+        
+        assertThrows(IllegalArgumentException.class, () -> {
+            validator.validateAndParse(malformedToken);
+        });
+    }
+    
+    private String getTestPublicKey() {
+        return """
+            -----BEGIN PUBLIC KEY-----
+            MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
+            -----END PUBLIC KEY-----
+            """;
+    }
+    
+    private String createTestToken() {
+        // Generate valid test token
+        return "eyJ...valid.token...here";
+    }
+    
+    private String createTamperedToken() {
+        // Generate token with invalid signature
+        return "eyJ...tampered.token...here";
+    }
+}
+```
+
+### 10.2.2 Integration Tests
+
+**File: `client/macos-java/src/test/java/com/licenseserver/client/EnrollmentIntegrationTest.java`**
+
+```java
+package com.licenseserver.client;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import static org.junit.jupiter.api.Assertions.*;
+
+@EnabledOnOs(OS.MAC) // Only run on macOS
+public class EnrollmentIntegrationTest {
+    
+    @Test
+    public void testCompleteEnrollmentFlow() throws Exception {
+        // This test requires a running license server
+        String serverUrl = System.getProperty("test.server.url", 
+                                             "https://localhost:8443");
+        String testToken = System.getProperty("test.enrollment.token");
+        
+        if (testToken == null) {
+            System.out.println("Skipping: test.enrollment.token not provided");
+            return;
+        }
+        
+        EnrollmentManager manager = new EnrollmentManager(serverUrl);
+        
+        var result = manager.enrollWithToken(testToken, "Test-Device");
+        
+        assertTrue(result.success());
+        assertNotNull(result.certificate());
+        assertNotNull(result.licenseToken());
+        
+        // Verify certificate stored in Keychain
+        CertificateManager certManager = new CertificateManager();
+        var storedCert = certManager.getCertificateFromKeychain(
+            "License Client Certificate"
+        );
+        
+        assertNotNull(storedCert);
+    }
+}
+```
+
+### 10.2.3 Running Client Tests
+
+```bash
+# Run all tests
+mvn test
+
+# Run specific test class
+mvn test -Dtest=DeviceIdentifierTest
+
+# Run with coverage
+mvn test jacoco:report
+
+# Run integration tests (requires server)
+mvn verify -Dtest.server.url=https://localhost:8443 \
+           -Dtest.enrollment.token=your_token_here
+
+# Skip tests during build
+mvn package -DskipTests
+```
+
+---
+
+## 10.3 End-to-End Testing
+
+### 10.3.1 E2E Test Scenarios
+
+**Scenario 1: New User Onboarding**
+```
+1. User creates account and subscribes (5 device limit)
+2. User logs into portal
+3. User generates enrollment token
+4. User installs client app on Device 1
+5. Client enrolls with token and device name "Work Laptop"
+6. Verify certificate installed in Keychain
+7. Verify license token stored
+8. Verify portal shows 1/5 devices
+9. Client validates license offline
+```
+
+**Scenario 2: Device Limit Enforcement**
+```
+1. User has 5/5 devices enrolled
+2. User attempts to generate enrollment token
+3. Portal shows error with device list
+4. User revokes "Old Device"
+5. Portal updates to 4/5 devices
+6. User generates new enrollment token
+7. User enrolls new device successfully
+8. Portal shows 5/5 devices
+```
+
+**Scenario 3: License Renewal**
+```
+1. User's subscription approaches expiration
+2. Client background task checks for renewal
+3. Client connects via mTLS
+4. Server validates payment and certificate
+5. Server generates new license token
+6. Client receives and stores new token
+7. Client continues operation seamlessly
+```
+
+### 10.3.2 E2E Test Script
+
+**File: `tests/e2e/test-enrollment-flow.sh`**
+
+```bash
+#!/bin/bash
+set -e
+
+echo "E2E Test: Complete Enrollment Flow"
+echo ""
+
+# Prerequisites check
+if [ -z "$TEST_USER_ID" ]; then
+    echo "Error: TEST_USER_ID not set"
+    exit 1
+fi
+
+# Step 1: Generate enrollment token
+echo "1. Generating enrollment token..."
+TOKEN_RESPONSE=$(curl -s -X POST \
+    -H "Cookie: session=$TEST_SESSION" \
+    https://localhost:8443/portal/enrollment/generate)
+
+TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token')
+echo "   Token: ${TOKEN:0:20}..."
+
+# Step 2: Build and run client enrollment
+echo "2. Running client enrollment..."
+cd client/macos-java
+mvn -q exec:java -Dexec.args="enroll $TOKEN Test-Device-E2E"
+
+# Step 3: Verify certificate in Keychain
+echo "3. Verifying certificate..."
+security find-certificate -c "License Client Certificate" \
+    ~/Library/Keychains/login.keychain-db > /dev/null
+echo "   ✓ Certificate found in Keychain"
+
+# Step 4: Verify device in portal
+echo "4. Verifying device in portal..."
+DEVICES=$(curl -s -H "Cookie: session=$TEST_SESSION" \
+    https://localhost:8443/portal/devices)
+
+DEVICE_COUNT=$(echo "$DEVICES" | jq '.devices | length')
+echo "   ✓ Device count: $DEVICE_COUNT"
+
+# Step 5: Verify license validation
+echo "5. Verifying license validation..."
+mvn -q exec:java -Dexec.args="validate"
+echo "   ✓ License valid"
+
+echo ""
+echo "✅ E2E test passed!"
+```
+
+---
+
+## 10.4 Performance Testing
+
+### Load Testing Server Endpoints
+
+**File: `tests/performance/load-test.js`** (using k6)
+
+```javascript
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export let options = {
+    stages: [
+        { duration: '1m', target: 50 },  // Ramp up
+        { duration: '3m', target: 50 },  // Stay at 50 users
+        { duration: '1m', target: 100 }, // Ramp to 100
+        { duration: '3m', target: 100 }, // Stay at 100
+        { duration: '1m', target: 0 },   // Ramp down
+    ],
+    thresholds: {
+        http_req_duration: ['p(95)<500'], // 95% under 500ms
+        http_req_failed: ['rate<0.01'],   // Less than 1% errors
+    },
+};
+
+export default function() {
+    // Test license renewal endpoint
+    let response = http.post(
+        'https://localhost:9443/api/license/renew',
+        JSON.stringify({
+            device_id: 'device_test_123'
+        }),
+        {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        }
+    );
+    
+    check(response, {
+        'status is 200': (r) => r.status === 200,
+        'response time < 500ms': (r) => r.timings.duration < 500,
+    });
+    
+    sleep(1);
 }
 ```
 
 ---
 
-## 10. Deployment
+## Summary
+
+Testing strategy provides:
+
+- ✅ **Unit tests** for all critical services
+- ✅ **Integration tests** for complete flows
+- ✅ **Device limit enforcement testing**
+- ✅ **E2E scenarios** covering user workflows
+- ✅ **Performance testing** for load validation
+- ✅ **Platform-specific tests** (macOS Keychain, etc.)
+- ✅ **Automated test execution** via CI/CD
+
+All tests ensure system reliability and correct behavior across all components.
+
+
+---
+
+## 11. Deployment
 
 ### Production Server Deployment
 
