@@ -83,23 +83,37 @@ class CertificateController
                 return json_encode(['error' => 'Enrollment token expired']);
             }
 
-            // 2. Check device limit
+            // 2. Check device limit - count unique device_ids
             $stmt = $this->db->query(
                 "SELECT device_limit FROM subscriptions WHERE id = ?",
                 [$tokenRecord['subscription_id']]
             );
             $subscription = $stmt->fetch(\PDO::FETCH_ASSOC);
 
+            // Check if this device_id is already enrolled
             $stmt = $this->db->query(
-                "SELECT COUNT(*) as count FROM clients WHERE subscription_id = ?",
-                [$tokenRecord['subscription_id']]
+                "SELECT COUNT(*) as count FROM clients
+                 WHERE subscription_id = ? AND device_id = ?",
+                [$tokenRecord['subscription_id'], $deviceId]
             );
-            $deviceCount = $stmt->fetch(\PDO::FETCH_ASSOC)['count'];
+            $existingDevice = $stmt->fetch(\PDO::FETCH_ASSOC)['count'];
 
-            if ($deviceCount >= $subscription['device_limit']) {
-                http_response_code(403);
-                return json_encode(['error' => 'Device limit reached for this subscription']);
+            // If device not already enrolled, check if we have room for a new device
+            if ($existingDevice == 0) {
+                // Count unique device_ids (not total enrollments)
+                $stmt = $this->db->query(
+                    "SELECT COUNT(DISTINCT device_id) as count FROM clients
+                     WHERE subscription_id = ?",
+                    [$tokenRecord['subscription_id']]
+                );
+                $uniqueDeviceCount = $stmt->fetch(\PDO::FETCH_ASSOC)['count'];
+
+                if ($uniqueDeviceCount >= $subscription['device_limit']) {
+                    http_response_code(403);
+                    return json_encode(['error' => 'Device limit reached for this subscription. Please revoke a device in the customer portal.']);
+                }
             }
+            // If device already enrolled, allow re-enrollment (certificate renewal)
 
             // 3. Issue certificate from CSR
             error_log("Received CSR (first 100 chars): " . substr($csr, 0, 100));
@@ -127,8 +141,8 @@ class CertificateController
 
             // 5. Store client record
             $this->db->query(
-                "INSERT INTO clients (client_cert_fingerprint, cert_serial_number, user_id, subscriber_email, subscriber_name, device_name, platform, enrollment_token, subscription_id, last_seen)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                "INSERT INTO clients (client_cert_fingerprint, cert_serial_number, user_id, subscriber_email, subscriber_name, device_name, platform, device_id, enrollment_token, subscription_id, last_seen)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
                 [
                     $certData['fingerprint'],
                     $certData['serial'],
@@ -137,6 +151,7 @@ class CertificateController
                     $user['full_name'],
                     $deviceName,
                     $platform,
+                    $deviceId,
                     $token,
                     $tokenRecord['subscription_id']
                 ]
