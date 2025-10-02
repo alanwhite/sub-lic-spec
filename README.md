@@ -178,11 +178,17 @@ sub-lic-spec/
 
 ✅ **Client (macOS Java)**
 - JDK 25 with modern Java features
+- Production-ready mTLS implementation (TLS 1.3 only)
+- Environment-aware configuration (dev/prod)
+- Certificate revocation checking (OCSP/CRL with soft-fail)
+- Hostname verification (production mode)
+- JWT license token validation with RS256
+- Certificate-JWT cryptographic binding
 - macOS Keychain integration
 - Device identification (hardware-based)
-- Certificate management
+- Certificate management (PKCS#12)
 - Swing UI with enrollment and migration dialogs
-- Configuration management
+- Two-phase authentication flow (TLS → mTLS)
 
 ## Development Status
 
@@ -221,18 +227,28 @@ Core business logic is stubbed - marked with `TODO` comments showing what needs 
    → Receives single-use token (7-day validity)
    ```
 
-2. **Client: Certificate Enrollment**
+2. **Client: Certificate Enrollment (Phase 1 - TLS)**
    ```
    User enters token in application
    → Provides device name for identification (e.g., "Work Laptop - Windows")
    → Client generates RSA key pair
    → Submits CSR + device info to server (TLS + token)
    → Server validates token and checks device limit
-   → Receives certificate + initial license token
+   → Receives certificate + CA chain
    → Installs certificate in platform keystore
    ```
 
-3. **Application Launch**
+3. **Client: License Token Acquisition (Phase 2 - mTLS)**
+   ```
+   Client performs mTLS authentication to server
+   → Server validates client certificate chain
+   → Server extracts certificate fingerprint
+   → Server generates JWT license token bound to certificate
+   → Client receives and stores JWT token securely
+   → Client can now perform offline license validation
+   ```
+
+4. **Application Launch**
    ```
    Client validates certificate (Layer 1)
    → Validates license token (Layer 2)

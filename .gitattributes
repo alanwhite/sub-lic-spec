@@ -1,0 +1,17 @@
+# Git attributes for license system reference implementation
+
+# These are DEVELOPMENT-ONLY keys for the reference implementation
+# They are intentionally committed to allow immediate testing
+# NEVER use these keys in production - regenerate all keys for production deployment
+
+ca/**/*.key -diff
+ca/**/*.pem -diff
+server/docker/ssl/*.key -diff
+server/docker/license-keys/*.key -diff
+server/docker/license-keys/*.pem -diff
+
+# Mark as binary to prevent line ending conversion
+*.key binary
+*.pem binary
+*.p12 binary
+*.pfx binary

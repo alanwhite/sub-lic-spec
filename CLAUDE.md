@@ -80,11 +80,16 @@ java -jar target/license-client-1.0.0.jar  # Run application
 
 When working with this specification:
 
-1. **Certificate and license keys are separate** - CA keys vs license signing keys
-2. **Device binding is critical** - Hardware-backed storage prevents casual sharing
-3. **Certificate-license binding** - Cryptographic binding prevents token reuse
-4. **Grace periods vary by subscription type** - 5 days (monthly), 14 days (annual)
-5. **Migration tokens are single-use** - 24-hour validity with device verification
+1. **Two-phase JWT delivery** - JWT tokens delivered via mTLS (Phase 2), NOT during enrollment (Phase 1)
+   - Phase 1 (TLS): Certificate enrollment - client receives certificate + CA chain
+   - Phase 2 (mTLS): JWT acquisition - client authenticates with certificate to receive JWT
+   - Prevents JWT theft during enrollment and ensures only certificate holders get licenses
+2. **Certificate and license keys are separate** - CA keys vs license signing keys
+3. **Device binding is critical** - Hardware-backed storage prevents casual sharing
+4. **Certificate-license binding** - JWT contains cert_fingerprint claim, cryptographically bound
+5. **Grace periods vary by subscription type** - 5 days (monthly), 14 days (annual)
+6. **Migration tokens are single-use** - 24-hour validity with device verification
+7. **Production-ready security** - TLS 1.3 only, hostname verification, certificate revocation (OCSP/CRL)
 
 ## Database Schema
 
@@ -124,26 +129,46 @@ When adding new features:
 
 ## Implementation Status
 
-**Completed:**
+**Completed (Production-Ready):**
 - ✅ Certificate Authority setup (containerized, no host OpenSSL needed)
 - ✅ Server directory structure and configuration
 - ✅ Database schema (7 migration files)
-- ✅ Docker setup (docker-compose.yml, Apache configs for TLS/mTLS)
+- ✅ Docker setup (docker-compose.yml, Apache configs for TLS/mTLS dual-port)
 - ✅ API structure (controllers with method stubs)
-- ✅ Service layer (PrivateCAService, LicenseTokenService with method stubs)
+- ✅ Service layer (PrivateCAService, LicenseTokenService with stubs)
 - ✅ Client UI framework (Swing with enrollment and migration dialogs)
 - ✅ Client infrastructure (CertificateManager, DeviceIdentifier)
+- ✅ **Production mTLS implementation** (TLS 1.3, hostname verification, cert revocation)
+- ✅ **JWT validation with RS256** (signature verification, expiration checking)
+- ✅ **Environment-aware configuration** (LicenseConfig for dev/prod switching)
+- ✅ **Certificate-JWT binding** (cert_fingerprint validation)
+- ✅ **Two-phase authentication flow** (TLS enrollment → mTLS JWT acquisition)
+- ✅ **PKCS#12 certificate management** (full client cert lifecycle)
 
 **To Be Implemented (marked with TODO):**
-- ⏳ Server PHP business logic (certificate issuance, license generation, validation)
-- ⏳ Client Java business logic (HTTP client with mTLS, JWT validation, storage encryption)
-- ⏳ Tests (unit and integration)
+- ⏳ Server PHP business logic (certificate issuance endpoint, full JWT generation)
+- ⏳ Complete server-side JWT issuance flow
+- ⏳ Tests (unit and integration for both server and client)
 - ⏳ Portal UI pages (HTML/JS for web interface)
+- ⏳ Platform-specific secure storage (Windows Certificate Store, Linux encrypted files)
 
 ## Document Changes
 
-Recent updates:
+Recent updates (latest):
+- **Production-ready client implementation completed** with JDK 25
+- **Two-phase JWT delivery** documented as core security feature across all docs
+- **Security rationale** added explaining why JWT must be delivered via mTLS (Phase 2)
+- `spec.md` - Added "Security Rationale for Two-Phase JWT Delivery" section
+- `spec.md` - Updated sequence diagram showing Phase 1 (TLS) and Phase 2 (mTLS)
+- `ReferenceImplGuide.md` - Added "Production-Ready Security Implementation" section
+- `ReferenceImplGuide.md` - Added code examples for TLS 1.3, OCSP/CRL, hostname verification
+- `README.md` - Updated user onboarding flow with two-phase model
+- `README.md` - Enhanced implementation status with production security features
+- `CLAUDE.md` - Updated with two-phase authentication and production features
+
+Earlier updates:
 - Repository transformed from specification-only to specification + reference implementation
 - Complete implementation scaffold added for CA, server, and client
-- `README.md` updated to reflect implementation status
-- `CLAUDE.md` updated with development commands and structure
+- Production mTLS implementation with environment-aware configuration
+- JWT validation with RS256 signature verification
+- Certificate-JWT cryptographic binding implemented
