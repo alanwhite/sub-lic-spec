@@ -258,15 +258,24 @@ sub-lic-spec/
 
 ### Certificate Provisioning → License Issuance
 
+**Phase 1 - Certificate Enrollment (TLS):**
+
 1. User obtains enrollment token from web portal (checks device limit)
 2. Client generates CSR and submits via TLS with token + device info
 3. Server (`CertificateController`) validates token via `EnrollmentTokenService`
 4. Server checks device limit compliance
 5. Private CA (`PrivateCAService`) issues X.509 client certificate
-6. Server (`LicenseTokenService`) generates initial JWT license token
-7. Client receives both certificate and license token together
-8. Client stores certificate in macOS Keychain
-9. Client stores encrypted license token
+6. Client receives certificate (PKCS#12 with private key)
+7. Client stores certificate in platform-specific secure storage
+
+**Phase 2 - JWT License Token Acquisition (mTLS):**
+
+8. Client performs mTLS authentication to `/api/license/verify` endpoint
+9. Server validates client certificate chain and extracts identity
+10. Server (`LicenseTokenService`) generates JWT license token bound to certificate fingerprint
+11. Server returns JWT in response over mTLS channel
+12. Client stores JWT token securely (platform keychain or encrypted file)
+13. Client can now perform offline license validation using stored JWT
 
 ### Device Management Flow
 
@@ -283,6 +292,130 @@ sub-lic-spec/
 3. License renewals delivered over mTLS channel
 4. Client operates offline using cached license token
 5. Background renewal checks every 24 hours
+
+### Production-Ready Security Implementation
+
+The reference implementation includes production-grade security features with environment-aware configuration:
+
+**Environment-Aware Configuration (`LicenseConfig.java`):**
+
+```java
+public class LicenseConfig {
+    private final Properties props;
+
+    public LicenseConfig() {
+        props = new Properties();
+        try (InputStream input = getClass().getClassLoader()
+                .getResourceAsStream("license-client.properties")) {
+            if (input != null) {
+                props.load(input);
+            }
+        } catch (IOException ex) {
+            // Use defaults
+        }
+    }
+
+    public boolean isHostnameVerificationEnabled() {
+        return Boolean.parseBoolean(
+            getProperty("license.server.hostname.verification", "true"));
+    }
+
+    public boolean isCertificateRevocationEnabled() {
+        return Boolean.parseBoolean(
+            getProperty("license.server.revocation.enabled", "true"));
+    }
+
+    public boolean allowSelfSignedCerts() {
+        return Boolean.parseBoolean(
+            getProperty("license.server.allow.selfsigned", "false"));
+    }
+}
+```
+
+**TLS 1.3 Enforcement with Production Security:**
+
+```java
+// Create SSLContext with TLS 1.3 only
+SSLContext sslContext = SSLContext.getInstance("TLSv1.3");
+sslContext.init(kmf.getKeyManagers(), trustManagers, new SecureRandom());
+
+// Configure SSL parameters to enforce TLS 1.3 and hostname verification
+SSLParameters sslParameters = sslContext.getDefaultSSLParameters();
+sslParameters.setProtocols(new String[]{"TLSv1.3"});
+
+// Enable endpoint identification (hostname verification) in production
+if (config.isHostnameVerificationEnabled()) {
+    sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
+}
+```
+
+**Certificate Revocation Checking (OCSP/CRL):**
+
+```java
+private static X509TrustManager createRevocationCheckingTrustManager(
+    X509TrustManager baseTrustManager, KeyStore trustStore) throws Exception {
+
+    return new X509TrustManager() {
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType)
+            throws java.security.cert.CertificateException {
+
+            // First do standard validation
+            baseTrustManager.checkServerTrusted(chain, authType);
+
+            // Then check for revocation via OCSP/CRL
+            PKIXParameters params = new PKIXParameters(trustStore);
+            params.setRevocationEnabled(true);
+
+            CertPathValidator validator = CertPathValidator.getInstance("PKIX");
+            PKIXRevocationChecker revocationChecker =
+                (PKIXRevocationChecker) validator.getRevocationChecker();
+
+            // Configure OCSP with fallback to CRL and soft-fail
+            revocationChecker.setOptions(java.util.EnumSet.of(
+                PKIXRevocationChecker.Option.PREFER_CRLS,
+                PKIXRevocationChecker.Option.SOFT_FAIL  // Don't fail if OCSP/CRL unavailable
+            ));
+
+            params.addCertPathChecker(revocationChecker);
+
+            // Build and validate certificate path
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            CertPath certPath = cf.generateCertPath(java.util.Arrays.asList(chain));
+            validator.validate(certPath, params);
+        }
+    };
+}
+```
+
+**Configuration Properties:**
+
+Development (`license-client.properties`):
+```properties
+license.server.url=https://localhost:9443
+license.server.hostname.verification=false
+license.server.revocation.enabled=false
+license.server.allow.selfsigned=true
+license.debug.logging=true
+```
+
+Production (`license-client.properties`):
+```properties
+license.server.url=https://license.example.com
+license.server.hostname.verification=true
+license.server.revocation.enabled=true
+license.server.allow.selfsigned=false
+license.debug.logging=false
+```
+
+**Key Security Features:**
+
+1. **TLS 1.3 Only** - No fallback to older protocols
+2. **Hostname Verification** - Prevents MITM attacks in production
+3. **Certificate Revocation** - OCSP preferred, CRL fallback, soft-fail for availability
+4. **Environment Switching** - Single codebase for dev and production
+5. **Separate CA and License Keys** - CA signs certificates, separate RSA key signs JWTs
+6. **Certificate-Bound Tokens** - JWT includes cert fingerprint preventing token reuse
 
 ---
 

@@ -1,0 +1,25 @@
+# Production License Client Configuration Example
+# Copy this to license-client.properties and customize for your production environment
+
+# Environment: production (enables all security features)
+environment=production
+
+# Server configuration - REPLACE WITH YOUR PRODUCTION VALUES
+server.url=https://license-server.example.com:9443
+server.hostname=license-server.example.com
+
+# Security settings - PRODUCTION DEFAULTS (all enabled for security)
+security.hostname.verification=true
+security.revocation.enabled=true
+
+# CA certificate path - should point to your CA chain bundle
+# In production, this should be:
+# - Bundled in JAR resources (recommended)
+# - Or in a secure system location
+security.ca.cert.path=/etc/license-client/ca-chain.crt
+
+# Development-only settings - MUST BE FALSE IN PRODUCTION
+dev.allow.selfsigned=false
+
+# Debug logging - automatically disabled in production mode
+debug.ssl=false

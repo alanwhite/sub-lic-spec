@@ -93,26 +93,53 @@ public class EnrollmentDialog extends JDialog {
         statusLabel.setText("Enrolling...");
         statusLabel.setForeground(Color.BLUE);
 
-        // TODO: Implement actual enrollment
-        SwingWorker<Void, Void> worker = new SwingWorker<>() {
+        SwingWorker<String, Void> worker = new SwingWorker<>() {
             @Override
-            protected Void doInBackground() throws Exception {
-                // 1. Generate CSR
-                // 2. Send enrollment request with token, CSR, device name, platform
-                // 3. Receive certificate and license token
-                // 4. Install certificate in Keychain
-                // 5. Store license token encrypted
-                Thread.sleep(2000); // Simulate enrollment
-                return null;
+            protected String doInBackground() throws Exception {
+                // 1. Get device ID
+                String deviceId = DeviceIdentifier.getDeviceId();
+
+                // 2. Send enrollment request
+                com.licenseserver.client.CertificateService.EnrollmentResult result =
+                    com.licenseserver.client.CertificateService.enroll(
+                        token,
+                        deviceName,
+                        deviceId,
+                        "macos"
+                    );
+
+                // 3. Install certificate in Keychain
+                com.licenseserver.client.CertificateManager certManager =
+                    new com.licenseserver.client.CertificateManager();
+                certManager.installCertificate(result.certificate, result.privateKey);
+
+                // 4. Store license token (TODO: implement secure storage)
+                // For now, we'll just verify it was received
+                if (result.licenseToken == null || result.licenseToken.isEmpty()) {
+                    throw new Exception("No license token received");
+                }
+
+                return "Enrollment successful! License expires: " + result.expiresAt;
             }
 
             @Override
             protected void done() {
-                statusLabel.setText("✓ Enrollment successful!");
-                statusLabel.setForeground(Color.GREEN);
-                Timer timer = new Timer(1500, e -> dispose());
-                timer.setRepeats(false);
-                timer.start();
+                try {
+                    String message = get();
+                    statusLabel.setText("✓ " + message);
+                    statusLabel.setForeground(Color.GREEN);
+                    Timer timer = new Timer(2500, e -> dispose());
+                    timer.setRepeats(false);
+                    timer.start();
+                } catch (Exception e) {
+                    System.err.println("Enrollment failed with exception:");
+                    e.printStackTrace();
+                    Throwable cause = e.getCause();
+                    String errorMessage = cause != null ? cause.getMessage() : e.getMessage();
+                    statusLabel.setText("✗ Enrollment failed: " + errorMessage);
+                    statusLabel.setForeground(Color.RED);
+                    enrollButton.setEnabled(true);
+                }
             }
         };
         worker.execute();

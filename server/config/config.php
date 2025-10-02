@@ -31,6 +31,7 @@ return [
         'intermediate_cert_path' => $_ENV['CA_INTERMEDIATE_CERT_PATH'] ?? '/etc/ca/intermediate-ca/certs/intermediate-ca.crt',
         'intermediate_key_path' => $_ENV['CA_INTERMEDIATE_KEY_PATH'] ?? '/etc/ca/intermediate-ca/private/intermediate-ca.key',
         'intermediate_key_password' => $_ENV['CA_INTERMEDIATE_KEY_PASSWORD'] ?? '',
+        'ca_chain' => $_ENV['CA_CHAIN_PATH'] ?? '/etc/ca/intermediate-ca/certs/ca-chain.crt',
         'issued_certs_dir' => $_ENV['CA_ISSUED_CERTS_DIR'] ?? '/etc/ca/issued-certificates',
         'crl_path' => $_ENV['CA_CRL_PATH'] ?? '/var/www/html/public/crl/current.crl',
         'crl_update_interval' => $_ENV['CA_CRL_UPDATE_INTERVAL'] ?? 86400,

@@ -9,7 +9,7 @@ echo "=========================================="
 echo ""
 
 # Use OpenSSL container to generate CA files
-docker run --rm -v "$(pwd)":/ca -w /ca alpine/openssl:latest sh -c '
+docker run --rm -v "$(pwd)":/ca -w /ca alpine/openssl:latest /bin/sh -c '
   # Install bash for script execution
   apk add --no-cache bash
 

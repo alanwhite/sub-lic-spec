@@ -37,13 +37,11 @@ foreach ($migrationFiles as $file) {
     $sql = file_get_contents($file);
 
     try {
-        $db->beginTransaction();
-        $db->exec($sql);
-        $db->exec("INSERT INTO migrations (migration) VALUES (?)", [$migration]);
-        $db->commit();
+        $db->getConnection()->exec($sql);
+        $stmt = $db->getConnection()->prepare("INSERT INTO migrations (migration) VALUES (?)");
+        $stmt->execute([$migration]);
         echo "Success: $migration\n";
     } catch (Exception $e) {
-        $db->rollback();
         echo "Error in $migration: " . $e->getMessage() . "\n";
         exit(1);
     }

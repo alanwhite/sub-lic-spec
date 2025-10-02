@@ -44,6 +44,7 @@ return [
         'POST /api/license/activate' => [LicenseController::class, 'activate'],
         'POST /api/license/renew' => [LicenseController::class, 'renew'],
         'GET /api/license/status' => [LicenseController::class, 'getStatus'],
+        'POST /api/license/verify' => [LicenseController::class, 'verify'],
         'POST /api/license/deactivate' => [LicenseController::class, 'deactivate'],
     ],
 

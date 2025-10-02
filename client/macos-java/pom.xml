@@ -21,8 +21,12 @@
     </properties>
 
     <dependencies>
-        <!-- JWT for license token validation - Zero additional dependencies at runtime -->
-        <!-- Using only JDK built-in APIs -->
+        <!-- Gson for JSON parsing -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -33,11 +37,10 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <source>25</source>
-                    <target>25</target>
-                    <compilerArgs>
-                        <arg>--enable-preview</arg>
-                    </compilerArgs>
+                    <source>23</source>
+                    <target>23</target>
+                    <fork>true</fork>
+                    <executable>${java.home}/bin/javac</executable>
                 </configuration>
             </plugin>
 

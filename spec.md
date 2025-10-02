@@ -81,12 +81,19 @@ Client App                      License Server
 
 ### 1.3 Key Integration Points
 
-**Certificate Provisioning → License Issuance:**
+**Certificate Provisioning (Phase 1 - TLS):**
 1. User obtains enrollment token from web portal
 2. Client generates CSR and submits via TLS with token
 3. Private CA issues X.509 client certificate
-4. Server immediately generates initial JWT license token
-5. Client receives both certificate and license token together
+4. Client receives certificate (PKCS#12 with private key)
+5. Client stores certificate in platform-specific secure storage
+
+**License Token Acquisition (Phase 2 - mTLS):**
+6. Client performs mTLS authentication to license verification endpoint
+7. Server validates client certificate chain and extracts identity
+8. Server generates JWT license token bound to certificate fingerprint
+9. Client receives and stores JWT token securely
+10. Client can now perform offline license validation
 
 **Ongoing Operations:**
 1. Client uses mTLS with certificate for authentication
@@ -150,6 +157,36 @@ Client App                      License Server
 - Client presents X.509 certificate for authentication
 - Server validates client certificate chain and identity
 - Bidirectional authentication for all license management
+
+**Security Rationale for Two-Phase JWT Delivery:**
+
+The JWT license token is delivered via mTLS (Phase 2) rather than during enrollment (Phase 1) to provide critical security guarantees:
+
+1. **X.509 Authentication for License Operations**
+   - Enrollment tokens are single-use and relatively weak (UUID-based)
+   - Certificate-based authentication is cryptographically strong
+   - Client must prove private key possession (cannot be faked)
+
+2. **Prevents Token Theft and Reuse**
+   - If JWT was delivered during enrollment over plain TLS:
+     - Network observers could capture the JWT in transit
+     - JWT could be stolen before secure storage
+     - Attackers could use JWT without possessing the certificate
+   - With mTLS delivery:
+     - Only legitimate certificate holders can request JWT
+     - JWT bound to certificate fingerprint prevents misuse
+     - Requires both certificate AND JWT for license operations
+
+3. **Certificate-JWT Cryptographic Binding**
+   - JWT contains `cert_fingerprint` claim (SHA-256 of client certificate)
+   - Server validates: certificate fingerprint matches JWT claim
+   - JWT is cryptographically useless without matching certificate
+   - Creates defense-in-depth: enrollment token → certificate → JWT → license operations
+
+4. **Separation of Concerns**
+   - Phase 1: Identity provisioning (TLS) - "Here's your certificate"
+   - Phase 2: License authorization (mTLS) - "Prove identity to get license"
+   - Each phase requires stronger cryptographic proof than the previous
 
 **Client Authentication:**
 - X.509 client certificates issued by private CA
@@ -419,7 +456,7 @@ sequenceDiagram
     C->>C: Create Certificate Signing Request (CSR)
     C->>C: Collect Device Info (name, platform)
     
-    Note over C,LS: Token Validation & Certificate Issuance (TLS)
+    Note over C,LS: Phase 1: Certificate Enrollment (TLS)
     C->>LS: Submit CSR + Token + Device Info (TLS - No Client Cert)
     Note right of C: {enrollment_token, csr, device_id,<br/>device_name, platform}
     LS->>DB: Validate Token & Retrieve User Info
@@ -429,14 +466,24 @@ sequenceDiagram
     CA->>LS: Return Signed Certificate
     LS->>DB: Mark Token as Used
     LS->>DB: Store Device Info with Certificate
-    LS->>C: Return Certificate + Initial License Token (TLS)
-    Note right of LS: {certificate, ca_chain,<br/>license_token, subscription_info}
-    
+    LS->>C: Return Certificate + CA Chain (TLS)
+    Note right of LS: {certificate, ca_chain}
+
     Note over C: Certificate Installation
     C->>C: Install Cert + Private Key in Platform Keystore
     C->>C: Verify Certificate Installation
-    
-    Note over C,LSM: All Future Operations Use mTLS
+
+    Note over C,LSM: Phase 2: JWT License Token Acquisition (mTLS)
+    C->>LSM: License Verification Request (mTLS with Client Cert)
+    LSM->>LSM: Validate Client Certificate Chain
+    LSM->>LSM: Extract Certificate Fingerprint
+    LSM->>DB: Lookup Subscription by Certificate
+    LSM->>LSM: Generate JWT with cert_fingerprint Claim
+    LSM->>C: Return JWT License Token (mTLS)
+    Note right of LSM: {license_token, tier, expires_in_days}
+    C->>C: Store JWT Token Securely
+
+    Note over C,LSM: Ongoing Operations (mTLS)
     C->>LSM: License Renewal Request (mTLS with Client Cert)
     LSM->>LSM: Validate Client Certificate
     LSM->>C: License Response (mTLS)

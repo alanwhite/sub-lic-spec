@@ -25,15 +25,97 @@ class PrivateCAService
      */
     public function issueCertificate(string $csr, string $commonName, int $validityYears = 2): array
     {
-        // TODO: Implement certificate issuance using OpenSSL
-        // 1. Validate CSR
-        // 2. Sign CSR with intermediate CA
-        // 3. Generate certificate
-        // 4. Calculate serial number and fingerprint
-        // 5. Store in CA database
-        // 6. Return certificate details
+        $caKeyPath = $this->config['ca']['intermediate_key_path'];
+        $caCertPath = $this->config['ca']['intermediate_cert_path'];
+        $caPassword = $this->config['ca']['intermediate_key_password'];
 
-        throw new \Exception('Certificate issuance not yet implemented');
+        // Create temporary files for CSR
+        $csrFile = tempnam(sys_get_temp_dir(), 'csr_');
+        $certFile = tempnam(sys_get_temp_dir(), 'cert_');
+        file_put_contents($csrFile, $csr);
+
+        try {
+            // Write CSR to temp file
+            file_put_contents($csrFile, $csr);
+            error_log("CSR written to $csrFile for signing");
+
+            // Calculate validity period
+            $validityDays = $validityYears * 365;
+
+            // Generate certificate using command-line openssl
+            $serial = sprintf('%X', random_int(100000, 999999));
+            error_log("Attempting to sign CSR with serial $serial using openssl command");
+
+            // Create temp file for output cert
+            $certOutFile = tempnam(sys_get_temp_dir(), 'cert_out_');
+
+            // Create extensions config file for client auth
+            $extFile = tempnam(sys_get_temp_dir(), 'ext_');
+            $extConfig = <<<EOT
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+basicConstraints = critical, CA:FALSE
+subjectKeyIdentifier = hash
+EOT;
+            file_put_contents($extFile, $extConfig);
+
+            // Use openssl command to sign the CSR with extensions
+            $cmd = sprintf(
+                'openssl x509 -req -in %s -CA %s -CAkey %s -passin pass:%s -out %s -days %d -sha256 -set_serial 0x%s -extfile %s 2>&1',
+                escapeshellarg($csrFile),
+                escapeshellarg($caCertPath),
+                escapeshellarg($caKeyPath),
+                escapeshellarg($caPassword),
+                escapeshellarg($certOutFile),
+                $validityDays,
+                $serial,
+                escapeshellarg($extFile)
+            );
+
+            error_log("Running: openssl x509 -req with client auth extensions...");
+            exec($cmd, $output, $returnCode);
+
+            // Clean up extensions file
+            @unlink($extFile);
+
+            if ($returnCode !== 0) {
+                $errorMsg = implode("\n", $output);
+                error_log("OpenSSL command failed: " . $errorMsg);
+                throw new \Exception('Failed to sign certificate: ' . $errorMsg);
+            }
+
+            // Read the generated certificate
+            $certPem = file_get_contents($certOutFile);
+            if (!$certPem) {
+                throw new \Exception('Failed to read generated certificate');
+            }
+
+            error_log("Certificate signed successfully");
+
+            // Parse certificate for details
+            $certData = openssl_x509_parse($certPem);
+            $serialHex = dechex($certData['serialNumber']);
+
+            // Calculate SHA-256 fingerprint
+            $fingerprint = hash('sha256', $certPem);
+
+            // Clean up temp cert file
+            @unlink($certOutFile);
+
+            return [
+                'certificate' => $certPem,
+                'serial' => $serial,
+                'fingerprint' => $fingerprint
+            ];
+        } finally {
+            // Clean up temporary files
+            if (file_exists($csrFile)) {
+                unlink($csrFile);
+            }
+            if (file_exists($certFile)) {
+                unlink($certFile);
+            }
+        }
     }
 
     /**

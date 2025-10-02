@@ -50,6 +50,9 @@ services:
         # Enable both sites (TLS and mTLS)
         a2ensite 000-default mtls &&
 
+        # Add Listen directive for mTLS port 9443 (only if not already present)
+        grep -q 'Listen 9443' /etc/apache2/ports.conf || echo 'Listen 9443' >> /etc/apache2/ports.conf &&
+
         # Set permissions
         chown -R www-data:www-data /var/www/html &&
 

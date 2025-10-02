@@ -12,7 +12,7 @@ use Firebase\JWT\Key;
 class LicenseTokenService
 {
     private array $config;
-    private string $privateKey;
+    private $privateKey;  // OpenSSLAsymmetricKey resource
     private string $publicKey;
 
     public function __construct()
@@ -28,6 +28,10 @@ class LicenseTokenService
 
         $privateKeyContent = file_get_contents($keyPath);
         $this->privateKey = openssl_pkey_get_private($privateKeyContent, $keyPassword);
+
+        if (!$this->privateKey) {
+            throw new \Exception('Failed to load license signing key: ' . openssl_error_string());
+        }
 
         $pubPath = $this->config['license']['signing_pub_path'];
         $this->publicKey = file_get_contents($pubPath);
