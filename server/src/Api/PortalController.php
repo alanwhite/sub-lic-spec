@@ -10,7 +10,7 @@ class PortalController
 {
     /**
      * Generate enrollment token
-     * POST /portal/enrollment/generate
+     * POST /portal/v1/enrollment/generate
      */
     public function generateEnrollmentToken(): string
     {
@@ -26,7 +26,7 @@ class PortalController
 
     /**
      * List enrolled devices for user
-     * GET /portal/devices
+     * GET /portal/v1/devices
      */
     public function listDevices(): string
     {
@@ -40,7 +40,7 @@ class PortalController
 
     /**
      * Revoke device certificate
-     * DELETE /portal/devices/:fingerprint
+     * DELETE /portal/v1/devices/:fingerprint
      */
     public function revokeDevice(string $fingerprint): string
     {
@@ -57,7 +57,7 @@ class PortalController
 
     /**
      * User login
-     * POST /portal/login
+     * POST /portal/v1/login
      */
     public function login(): string
     {
@@ -67,7 +67,7 @@ class PortalController
 
     /**
      * User logout
-     * POST /portal/logout
+     * POST /portal/v1/logout
      */
     public function logout(): string
     {
@@ -77,7 +77,7 @@ class PortalController
 
     /**
      * Get account info
-     * GET /portal/account
+     * GET /portal/v1/account
      */
     public function getAccount(): string
     {
@@ -87,7 +87,7 @@ class PortalController
 
     /**
      * Delete account
-     * POST /portal/account/delete
+     * POST /portal/v1/account/delete
      */
     public function deleteAccount(): string
     {
@@ -97,7 +97,7 @@ class PortalController
 
     /**
      * Confirm account deletion
-     * POST /portal/account/delete/confirm
+     * POST /portal/v1/account/delete/confirm
      */
     public function confirmDeleteAccount(): string
     {
@@ -110,7 +110,7 @@ class PortalController
 
     /**
      * Get subscription info
-     * GET /portal/subscription
+     * GET /portal/v1/subscription
      */
     public function getSubscription(): string
     {
@@ -120,7 +120,7 @@ class PortalController
 
     /**
      * Update subscription
-     * POST /portal/subscription/update
+     * POST /portal/v1/subscription/update
      */
     public function updateSubscription(): string
     {
@@ -130,7 +130,7 @@ class PortalController
 
     /**
      * List enrollment tokens for user
-     * GET /portal/enrollment/tokens
+     * GET /portal/v1/enrollment/tokens
      */
     public function listEnrollmentTokens(): string
     {

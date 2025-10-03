@@ -92,22 +92,22 @@ composer run lint
 ## API Endpoints
 
 ### Portal (Session Auth)
-- `POST /portal/login` - User login
-- `POST /portal/enrollment/generate` - Generate enrollment token
-- `GET /portal/devices` - List enrolled devices
-- `DELETE /portal/devices/:fingerprint` - Revoke device
+- `POST /portal/v1/login` - User login
+- `POST /portal/v1/enrollment/generate` - Generate enrollment token
+- `GET /portal/v1/devices` - List enrolled devices
+- `DELETE /portal/v1/devices/:fingerprint` - Revoke device
 
 ### Certificate (TLS + Token)
-- `POST /api/certificate/enroll` - Enroll with CSR + token
+- `POST /api/v1/certificate/enroll` - Enroll with CSR + token
 
 ### License (mTLS Required)
-- `POST /api/license/activate` - Activate license
-- `POST /api/license/renew` - Renew license
-- `GET /api/license/status` - Check license status
+- `POST /api/v1/license/activate` - Activate license
+- `POST /api/v1/license/renew` - Renew license
+- `GET /api/v1/license/status` - Check license status
 
 ### Migration (mTLS Required)
-- `POST /api/migration/initiate` - Start device migration
-- `POST /api/migration/complete` - Complete migration
+- `POST /api/v1/migration/initiate` - Start device migration
+- `POST /api/v1/migration/complete` - Complete migration
 
 ## Configuration
 

@@ -10,7 +10,7 @@ class MigrationController
 {
     /**
      * Initiate device migration
-     * POST /api/migration/initiate
+     * POST /api/v1/migration/initiate
      */
     public function initiate(): string
     {
@@ -25,7 +25,7 @@ class MigrationController
 
     /**
      * Complete device migration
-     * POST /api/migration/complete
+     * POST /api/v1/migration/complete
      */
     public function complete(): string
     {
@@ -43,7 +43,7 @@ class MigrationController
 
     /**
      * Get migration status
-     * GET /api/migration/status/:token
+     * GET /api/v1/migration/status/:token
      */
     public function getStatus(string $token): string
     {

@@ -1,0 +1,787 @@
+openapi: 3.1.0
+info:
+  title: License Server API
+  description: |
+    Subscription licensing system with X.509 certificate authentication and JWT-based license management.
+
+    ## Security Architecture
+
+    This API implements a two-phase security model:
+
+    1. **Phase 1 - Certificate Enrollment (TLS)**: Client enrolls and receives X.509 client certificate
+    2. **Phase 2 - License Operations (mTLS)**: Client authenticates with certificate to receive JWT license token
+
+    ## Authentication Methods
+
+    - **mTLS (Mutual TLS)**: Required for all `/api/v1/license/*` and `/api/v1/migration/*` endpoints
+    - **Enrollment Token**: One-time use token for certificate enrollment
+    - **Session Cookie**: Browser-based authentication for portal endpoints
+
+  version: 1.0.0
+  contact:
+    name: License Server Support
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://localhost:8443
+    description: TLS server (certificate enrollment, portal)
+  - url: https://localhost:9443
+    description: mTLS server (license operations)
+
+tags:
+  - name: Portal
+    description: Web portal for user account and device management
+  - name: Certificate
+    description: X.509 certificate enrollment and management
+  - name: License
+    description: JWT license token operations (requires mTLS)
+  - name: Migration
+    description: Device migration and license transfer
+
+paths:
+  # ============================================================================
+  # Portal Endpoints (Session Authentication)
+  # ============================================================================
+
+  /portal/v1/login:
+    post:
+      tags: [Portal]
+      summary: User login
+      description: Authenticate user and create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /portal/v1/logout:
+    post:
+      tags: [Portal]
+      summary: User logout
+      description: Destroy session
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+  /portal/v1/account:
+    get:
+      tags: [Portal]
+      summary: Get account details
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /portal/v1/account/delete:
+    post:
+      tags: [Portal]
+      summary: Initiate account deletion
+      description: Request account deletion (sends confirmation email)
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Deletion initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Confirmation email sent
+
+  /portal/v1/account/delete/confirm:
+    post:
+      tags: [Portal]
+      summary: Confirm account deletion
+      description: Finalize account deletion with confirmation token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: Confirmation token from email
+      responses:
+        '200':
+          description: Account deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /portal/v1/enrollment/generate:
+    post:
+      tags: [Portal]
+      summary: Generate enrollment token
+      description: Create a single-use token for device enrollment
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_name:
+                  type: string
+                  example: My Laptop
+      responses:
+        '200':
+          description: Token generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollmentToken'
+
+  /portal/v1/enrollment/tokens:
+    get:
+      tags: [Portal]
+      summary: List enrollment tokens
+      description: Get all enrollment tokens for current user
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Token list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EnrollmentToken'
+
+  /portal/v1/devices:
+    get:
+      tags: [Portal]
+      summary: List enrolled devices
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+
+  /portal/v1/devices/{fingerprint}:
+    delete:
+      tags: [Portal]
+      summary: Revoke device certificate
+      description: Revoke client certificate and deactivate device
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: fingerprint
+          in: path
+          required: true
+          description: SHA-256 certificate fingerprint
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Device revoked
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /portal/v1/subscription:
+    get:
+      tags: [Portal]
+      summary: Get subscription details
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+  /portal/v1/subscription/update:
+    post:
+      tags: [Portal]
+      summary: Update subscription
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscription_type:
+                  type: string
+                  enum: [monthly, annual]
+                device_limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+      responses:
+        '200':
+          description: Subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+  # ============================================================================
+  # Certificate Endpoints (TLS + Token)
+  # ============================================================================
+
+  /api/v1/certificate/enroll:
+    post:
+      tags: [Certificate]
+      summary: Enroll device and receive client certificate
+      description: |
+        Phase 1 of authentication flow. Client submits CSR with enrollment token
+        and receives X.509 client certificate + CA chain.
+      security:
+        - enrollmentToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, csr, device_name, platform, device_id]
+              properties:
+                token:
+                  type: string
+                  description: Single-use enrollment token
+                  example: a1b2c3d4e5f6...
+                csr:
+                  type: string
+                  description: PEM-encoded Certificate Signing Request
+                  example: "-----BEGIN CERTIFICATE REQUEST-----\nMIIC..."
+                device_name:
+                  type: string
+                  example: MacBook Pro
+                platform:
+                  type: string
+                  enum: [macos, windows, linux]
+                device_id:
+                  type: string
+                  description: Hardware device identifier (IOPlatformUUID, etc.)
+                  example: 12345678-ABCD-1234-ABCD-123456789ABC
+      responses:
+        '200':
+          description: Certificate issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate:
+                    type: string
+                    description: PEM-encoded client certificate
+                  ca_chain:
+                    type: array
+                    items:
+                      type: string
+                      description: PEM-encoded CA certificates
+                  fingerprint:
+                    type: string
+                    description: SHA-256 fingerprint of client certificate
+                  serial_number:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Invalid or expired enrollment token
+        '403':
+          description: Device limit reached
+
+  /api/v1/certificate/renew:
+    post:
+      tags: [Certificate]
+      summary: Renew expiring client certificate
+      description: Submit new CSR to renew certificate before expiration
+      security:
+        - mtls: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr]
+              properties:
+                csr:
+                  type: string
+                  description: PEM-encoded Certificate Signing Request
+      responses:
+        '200':
+          description: Certificate renewed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate:
+                    type: string
+                  ca_chain:
+                    type: array
+                    items:
+                      type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /crl/v1/current.crl:
+    get:
+      tags: [Certificate]
+      summary: Download Certificate Revocation List
+      description: Get list of revoked certificates (updated every 24 hours)
+      responses:
+        '200':
+          description: CRL file
+          content:
+            application/x-pkcs7-crl:
+              schema:
+                type: string
+                format: binary
+
+  # ============================================================================
+  # License Endpoints (mTLS Required)
+  # ============================================================================
+
+  /api/v1/license/activate:
+    post:
+      tags: [License]
+      summary: Activate license and receive JWT token
+      description: |
+        Phase 2 of authentication flow. Client authenticates with X.509 certificate
+        and receives JWT license token bound to certificate fingerprint.
+      security:
+        - mtls: []
+      responses:
+        '200':
+          description: License activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseToken'
+        '401':
+          description: Invalid or revoked certificate
+        '403':
+          description: Subscription expired or inactive
+
+  /api/v1/license/verify:
+    post:
+      tags: [License]
+      summary: Verify and obtain JWT license token
+      description: Alternative to activate - verifies mTLS and returns JWT
+      security:
+        - mtls: []
+      responses:
+        '200':
+          description: License verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: true
+                  token:
+                    type: string
+                    description: JWT license token
+                    example: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+                  message:
+                    type: string
+                  client_dn:
+                    type: string
+                    example: CN=device123
+                  tier:
+                    type: string
+                    enum: [free, premium]
+                  expires_in_days:
+                    type: integer
+
+  /api/v1/license/renew:
+    post:
+      tags: [License]
+      summary: Renew JWT license token
+      description: Get new JWT token before current one expires
+      security:
+        - mtls: []
+      responses:
+        '200':
+          description: License renewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseToken'
+
+  /api/v1/license/status:
+    get:
+      tags: [License]
+      summary: Get license status
+      description: Check current license and subscription status
+      security:
+        - mtls: []
+      responses:
+        '200':
+          description: License status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active:
+                    type: boolean
+                  subscription:
+                    $ref: '#/components/schemas/Subscription'
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /api/v1/license/deactivate:
+    post:
+      tags: [License]
+      summary: Deactivate current license
+      description: Voluntarily deactivate license for this device
+      security:
+        - mtls: []
+      responses:
+        '200':
+          description: License deactivated
+
+  # ============================================================================
+  # Migration Endpoints (mTLS Required)
+  # ============================================================================
+
+  /api/v1/migration/initiate:
+    post:
+      tags: [Migration]
+      summary: Initiate device migration
+      description: |
+        Generate 24-hour migration token to transfer license from current device
+        to a new device.
+      security:
+        - mtls: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_device_id]
+              properties:
+                target_device_id:
+                  type: string
+                  description: Hardware ID of new device
+      responses:
+        '200':
+          description: Migration initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  migration_token:
+                    type: string
+                    description: Single-use 24-hour token
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /api/v1/migration/complete:
+    post:
+      tags: [Migration]
+      summary: Complete device migration
+      description: |
+        New device submits migration token to receive transferred license.
+        Old device's license is deactivated.
+      security:
+        - mtls: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [migration_token]
+              properties:
+                migration_token:
+                  type: string
+      responses:
+        '200':
+          description: Migration completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseToken'
+        '401':
+          description: Invalid or expired migration token
+        '403':
+          description: Device limit would be exceeded
+
+  /api/v1/migration/status/{token}:
+    get:
+      tags: [Migration]
+      summary: Check migration status
+      description: Verify migration token validity and status
+      security:
+        - mtls: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Migration status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  used:
+                    type: boolean
+                  expires_at:
+                    type: string
+                    format: date-time
+
+# ==============================================================================
+# Components
+# ==============================================================================
+
+components:
+  securitySchemes:
+    mtls:
+      type: mutualTLS
+      description: |
+        Client certificate authentication. Certificate must be issued by the
+        license server CA and not revoked.
+
+    enrollmentToken:
+      type: apiKey
+      in: header
+      name: X-Enrollment-Token
+      description: Single-use enrollment token from portal
+
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: PHPSESSID
+      description: Session cookie from portal login
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        created_at:
+          type: string
+          format: date-time
+
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: integer
+        subscription_type:
+          type: string
+          enum: [monthly, annual]
+        device_limit:
+          type: integer
+          description: Maximum number of unique devices allowed
+        devices_enrolled:
+          type: integer
+          description: Current number of unique devices
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        payment_status:
+          type: string
+          enum: [active, failed, cancelled]
+        auto_renew:
+          type: boolean
+        tier:
+          type: string
+          enum: [free, premium]
+
+    Device:
+      type: object
+      properties:
+        id:
+          type: integer
+        device_name:
+          type: string
+        platform:
+          type: string
+          enum: [macos, windows, linux]
+        device_id:
+          type: string
+          description: Hardware device identifier
+        client_cert_fingerprint:
+          type: string
+          description: SHA-256 fingerprint
+        cert_serial_number:
+          type: string
+        enrolled_at:
+          type: string
+          format: date-time
+        last_seen:
+          type: string
+          format: date-time
+
+    EnrollmentToken:
+      type: object
+      properties:
+        token:
+          type: string
+        subscription_id:
+          type: integer
+        max_uses:
+          type: integer
+          default: 1
+        used_count:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    LicenseToken:
+      type: object
+      properties:
+        token:
+          type: string
+          description: |
+            JWT token with claims:
+            - sub: subscription_id
+            - cert_fp: certificate fingerprint (SHA-256)
+            - device_id: hardware device identifier
+            - tier: subscription tier (free/premium)
+            - exp: expiration timestamp
+            - iat: issued at timestamp
+          example: eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        expires_at:
+          type: string
+          format: date-time
+        tier:
+          type: string
+          enum: [free, premium]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        code:
+          type: string
+          description: Error code
+        details:
+          type: object
+          description: Additional error details
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Missing required fields
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Invalid credentials
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Device limit reached
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Device not found

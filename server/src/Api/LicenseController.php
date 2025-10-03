@@ -18,7 +18,7 @@ class LicenseController
     }
     /**
      * Activate license for device
-     * POST /api/license/activate
+     * POST /api/v1/license/activate
      */
     public function activate(): string
     {
@@ -34,7 +34,7 @@ class LicenseController
 
     /**
      * Renew license
-     * POST /api/license/renew
+     * POST /api/v1/license/renew
      */
     public function renew(): string
     {
@@ -50,7 +50,7 @@ class LicenseController
 
     /**
      * Get license status
-     * GET /api/license/status
+     * GET /api/v1/license/status
      */
     public function getStatus(): string
     {
@@ -64,7 +64,7 @@ class LicenseController
 
     /**
      * Verify license token and issue new JWT (test endpoint)
-     * POST /api/license/verify
+     * POST /api/v1/license/verify
      */
     public function verify(): string
     {

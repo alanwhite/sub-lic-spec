@@ -133,7 +133,7 @@ public class CertificateService {
 
         // 2. Build enrollment request
         String serverUrl = AppConfig.getLicenseServerUrl();
-        String enrollmentUrl = serverUrl + "/api/certificate/enroll";
+        String enrollmentUrl = serverUrl + "/api/v1/certificate/enroll";
 
         String jsonBody = String.format(
             "{\"token\":\"%s\",\"csr\":\"%s\",\"device_name\":\"%s\",\"device_id\":\"%s\",\"platform\":\"%s\"}",

@@ -25,7 +25,7 @@ class CertificateController
 
     /**
      * Enroll a new client certificate
-     * POST /api/certificate/enroll
+     * POST /api/v1/certificate/enroll
      *
      * Request body:
      * - token: Enrollment token
@@ -209,7 +209,7 @@ class CertificateController
 
     /**
      * Get Certificate Revocation List
-     * GET /crl/current.crl
+     * GET /crl/v1/current.crl
      */
     public function getCRL(): void
     {

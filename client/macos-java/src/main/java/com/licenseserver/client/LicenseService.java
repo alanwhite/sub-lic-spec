@@ -104,7 +104,7 @@ public class LicenseService {
             .build();
 
         // Build verification request using configured URL
-        String verifyUrl = config.getServerUrl() + "/api/license/verify";
+        String verifyUrl = config.getServerUrl() + "/api/v1/license/verify";
 
         String jsonBody = String.format(
             "{\"license_token\":\"%s\"}",
